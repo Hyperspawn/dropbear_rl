@@ -59,8 +59,8 @@ from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkp
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils import get_checkpoint_path
 
-import unitree_rl_lab.tasks  # noqa: F401
-from unitree_rl_lab.utils.parser_cfg import parse_env_cfg
+import dropbear_rl_lab.tasks  # noqa: F401
+from dropbear_rl_lab.utils.parser_cfg import parse_env_cfg
 
 
 def main():
