@@ -2,14 +2,22 @@
 
 <div align="center">
 
-![Dropbear Robot](https://img.shields.io/badge/Robot-Dropbear_Humanoid-blue)
-![Isaac Lab](https://img.shields.io/badge/Isaac_Lab-2.2.0-green)
-![Isaac Sim](https://img.shields.io/badge/Isaac_Sim-5.0.0-orange)
-![License](https://img.shields.io/badge/License-MIT-red)
+
+
+[![Website](https://img.shields.io/badge/Website-Hyperspawn.co-blue?style=for-the-badge&logo=globe)](https://hyperspawn.co)
+[![Issues](https://img.shields.io/badge/GitHub-Issues-red?style=for-the-badge&logo=github)](https://github.com/hyperspawn/dropbear_isaac/issues)
+[![Discord](https://img.shields.io/badge/Discord-Join_Server-5865F2?style=for-the-badge&logo=discord)](https://discord.com/invite/tFeqrdJzkS)
+[![Telegram](https://img.shields.io/badge/Telegram-Community-26A5E4?style=for-the-badge&logo=telegram)](https://t.me/fractionalrobots)
+[![Documentation](https://img.shields.io/badge/Docs-Read_Here-orange?style=for-the-badge&logo=gitbook)](https://www.hyperspawn.co/docs)
+[![Gallery](https://img.shields.io/badge/Gallery-View_Media-purple?style=for-the-badge&logo=image)](https://hyperspawn.co/gallery)
+[![Buy Robot](https://img.shields.io/badge/Buy-Robot-success?style=for-the-badge&logo=shopping-cart)](https://hyperspawn.co/buy)
+[![Web Simulator](https://img.shields.io/badge/Web-Simulator-lightblue?style=for-the-badge&logo=play)](https://hyperspawn.co/sim)
 
 **Advanced Reinforcement Learning Environments for Dropbear**
 
 *by Hyperspawn Robotics*
+
+<img src="media/gallery/images/dropbear_isaac_lab.png" alt="Dropbear Training Environment" width="800"/>
 
 </div>
 
@@ -62,6 +70,11 @@ C:\isaac-sim\python.bat scripts/rsl_rl/play.py --task Isaac-Velocity-Dropbear-Pl
 
 ## 🎮 Quick Start
 
+<div align="center">
+<img src="media/gallery/images/dropbear_isaaclab.png" alt="Dropbear Isaac Lab Environment" width="600"/>
+</div>
+
+
 ### Training a Policy
 
 ```bash
@@ -111,7 +124,6 @@ dropbear_rl_lab/
     └── dropbear_rl_lab/                           # Core package
         ├── assets/robots/                         # Robot configurations
         │   ├── dropbear.py                        # Dropbear robot config
-        │   └── unitree_actuators.py               # Actuator definitions
         ├── tasks/locomotion/                      # Locomotion tasks
         │   ├── mdp/                               # MDP components
         │   │   ├── rewards.py                     # Reward functions
@@ -123,14 +135,14 @@ dropbear_rl_lab/
         └── utils/                                 # Utility functions
 ```
 
-## 🎯 Available Tasks
+## 🏋️ Available Tasks
 
 | Task ID | Description | Action Space | Observation Space |
 |---------|-------------|--------------|-------------------|
 | `Isaac-Velocity-Dropbear-v0` | Velocity tracking on flat terrain | 22 DoF | 50-dim |
 | `Isaac-Velocity-Dropbear-Play-v0` | Playback environment | 22 DoF | 50-dim |
 
-## 🏗️ Robot Configuration
+## ⚙️ Robot Configuration
 
 The Dropbear robot features:
 
@@ -178,8 +190,10 @@ class DropbearVelocityRoughPPORunnerCfg(BasePPORunnerCfg):
 Monitor training progress through:
 
 - **TensorBoard**: Automatic logging to `logs/rsl_rl/`
-- **Console Output**: Real-time reward and loss metrics
+- **Console Output**: Real-time reward and loss metrics  
 - **Video Recording**: Periodic policy demonstrations
+- **Model Checkpoints**: Saved every 100 iterations in `logs/rsl_rl/dropbear_velocity/`
+
 
 ## 🤝 Contributing
 
@@ -199,6 +213,41 @@ black source/dropbear_rl_lab/
 isort source/dropbear_rl_lab/
 ```
 
+## 🎨 Development Gallery
+
+<div align="center">
+
+### Isaac Sim Assembly Process
+
+<table>
+<tr>
+<td><img src="media/gallery/images/dropbear_usd_wip (15).png" alt="Assembly WIP 1" width="200"/></td>
+<td><img src="media/gallery/images/dropbear_usd_wip (24).png" alt="Assembly WIP 2" width="200"/></td>
+<td><img src="media/gallery/images/dropbear_usd_wip (23).png" alt="Assembly WIP 3" width="200"/></td>
+<td><img src="media/gallery/images/dropbear_usd_wip (18).png" alt="Assembly WIP 4" width="200"/></td>
+</tr>
+<tr>
+<td><img src="media/gallery/images/dropbear_usd_wip (33).png" alt="Assembly WIP 5" width="200"/></td>
+<td><img src="media/gallery/images/dropbear_usd_wip (10).png" alt="Joint Setup" width="200"/></td>
+<td><img src="media/gallery/images/dropbear_usd_wip (5).png" alt="Rigging Process" width="200"/></td>
+<td><img src="media/gallery/images/dropbear_usd_wip (38).png" alt="Final Assembly" width="200"/></td>
+</tr>
+</table>
+
+*Development snapshots showing the Isaac Sim assembly and rigging process*
+### 🎬 Video Demonstrations
+
+#### Development Process
+<video width="400" controls style="display: inline-block; margin-right: 10px;"><source src="media/gallery/videos/wip_isaac_sim (1).mp4" type="video/mp4">Your browser does not support the video tag.</video><video width="400" controls style="display: inline-block;"><source src="media/gallery/videos/wip_isaac_sim (2).mp4" type="video/mp4">Your browser does not support the video tag.</video>
+
+#### New Dropbear Training Environment
+Training videos are automatically generated in `logs/rsl_rl/*/videos/play/` during policy evaluation.
+
+<td><img src="media\gallery\videos\isaac_lab_random_weights_dropbear.gif" alt="New Dropbear Training Environment" width="300"/></td>
+
+*You will start fresh with random weights and training video showing random locomotion policy*
+</div>
+
 ## 📚 Documentation
 
 - [Isaac Lab Documentation](https://isaac-sim.github.io/IsaacLab/)
@@ -206,21 +255,6 @@ isort source/dropbear_rl_lab/
 - [Dropbear Robot Specifications](https://www.hyperspawn.co/docs)
 
 ## 🐛 Troubleshooting
-
-### ✅ Confirmed Working Commands
-
-These commands have been tested and verified to work:
-
-```bash
-# Training (1 iteration test) - CONFIRMED WORKING
-C:\isaac-sim\python.bat scripts/rsl_rl/train.py --task Isaac-Velocity-Dropbear-v0 --max_iterations 1
-
-# Playing without video - SHOULD WORK (config fixed)
-C:\isaac-sim\python.bat scripts/rsl_rl/play.py --task Isaac-Velocity-Dropbear-Play-v0
-
-# Playing with video recording - REQUIRES MOVIEPY
-C:\isaac-sim\python.bat scripts/rsl_rl/play.py --task Isaac-Velocity-Dropbear-Play-v0 --video
-```
 
 ### Common Issues
 
@@ -233,6 +267,7 @@ C:\isaac-sim\python.bat scripts/rsl_rl/play.py --task Isaac-Velocity-Dropbear-Pl
 - This error occurred when trying to modify terrain generator settings on simple plane terrain
 
 **Training crashes with CUDA errors:**
+- ✅ Fixed: Reduce number of environments
 ```bash
 # Reduce number of environments
 C:\isaac-sim\python.bat scripts/rsl_rl/train.py --task Isaac-Velocity-Dropbear-v0 --num_envs 512
@@ -243,7 +278,7 @@ C:\isaac-sim\python.bat scripts/rsl_rl/train.py --task Isaac-Velocity-Dropbear-v
 - Verify initial joint positions
 - Adjust reward weights in `velocity_env_cfg.py`
 
-**Commands hanging or not responding:**
+**CLI freezes or not responding:**
 - Some commands may require Isaac Sim to initialize, which can take time
 - Use `--headless` flag for faster initialization without GUI
 - Ensure Isaac Lab is properly installed and configured
@@ -255,24 +290,23 @@ This project is licensed under MIT License - see the [LICENSE](LICENSE) file for
 ## 🙏 Acknowledgments
 
 - **[Cole Myers](https://github.com/robit-man)** from [POINTBLANK](https://www.pointblankllc.com)
-- **[Fractional Robots](https://t.me/fractionalrobots)** community for collaboration and support
-- **[Mohan Vamsi K.](https://www.upwork.com/freelancers/~0106f44a845518bf78?mp_source=share)** for assistance with complex rigging challenges, particularly the 4-bar closed loop mechanism implementation in Isaac Sim. Thank you for your technical help in joint assembly work.
-- **NVIDIA** for providing the Isaac Sim and Isaac Lab platforms that make this project possible
-- **Legged Robotics Lab (ETH Zurich)** for the RSL-RL reinforcement learning framework
-- The **Isaac Lab community** for continuous support and contributions
+- **[Fractionalrobots](https://t.me/fractionalrobots)** - for collaboration and support (Shout out to [Anthrobotics](https://github.com/Anthrobotics) and K-scale [K-scale](https://www.kscale.dev/))
+- **[Mohan Vamsi K.](https://www.upwork.com/freelancers/~0106f44a845518bf78?mp_source=share)** for investigating issues I gaced in rigging parts of dropbear (4 bar closed loop mechanism in isaac sim. thanks for your time and efforts adding joints to the assembly in isaac sim)
+- **NVIDIA** for Isaac Sim and Isaac Lab platforms
+- **Me🙋‍♂️** for the ground work on this project
 
 ## Dev support
 
 For technical support and questions:
 
-- Web: [hyperspawn.co](https://hyperspawn.co)
-- Issues: [GitHub Issues](https://github.com/hyperspawn/dropbear_isaac/issues)
-- Discord: [Discord](https://discord.com/invite/tFeqrdJzkS)
-- TG: [TG](https://t.me/fractionalrobots)
-- Docs: [Docs](https://www.hyperspawn.co/docs)
-- Gallery: [Gallery](https://hyperspawn.co/gallery)
-- Buy Robot: [Buy Robot](https://hyperspawn.co/buy)
-- Web-Sim: [Web-Sim](https://hyperspawn.co/sim)
+- [Hyperspawn.co](https://hyperspawn.co)
+- [GitHub Issues](https://github.com/hyperspawn/dropbear_isaac/issues)
+- [Discord](https://discord.com/invite/tFeqrdJzkS)
+- [TG](https://t.me/fractionalrobots)
+- [Docs](https://www.hyperspawn.co/docs)
+- [Gallery](https://hyperspawn.co/gallery)
+- [Buy Robot](https://hyperspawn.co/buy)
+- [Web-Sim](https://hyperspawn.co/sim)
 
 ---
 
