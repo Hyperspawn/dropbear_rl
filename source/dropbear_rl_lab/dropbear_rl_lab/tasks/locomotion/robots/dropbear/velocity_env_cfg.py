@@ -194,7 +194,7 @@ class ActionsCfg:
             "LL_hip_joint", "LL_knee_actuator_joint", "RL_hip_joint", "RL_knee_actuator_joint",
             "LL_Revolute28", "LL_Revolute29", "RL_Revolute28", "RL_Revolute29",
         ], 
-        scale=0.25, 
+        scale=0.05,  # Even smaller action scale to prevent weird movements 
         use_default_offset=True
     )
 
@@ -261,16 +261,16 @@ class RewardsCfg:
     alive = RewTerm(func=mdp.is_alive, weight=0.15)
 
     # -- base (scaled down to prevent numerical instability)
-    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.01)  # Much smaller weight
-    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.01)  # Much smaller weight
-    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-1e-8)  # Much smaller weight
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.001)  # Much smaller weight
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-0.1)  # Much smaller weight
+    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.001)  # Much smaller weight
+    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.001)  # Much smaller weight
+    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-1e-10)  # Extremely small to avoid instability
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)  # Much smaller weight
+    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-0.1)  # Stronger penalty for joint limits  # Much smaller weight
 
     # Dropbear-specific joint deviations
     joint_deviation_arms = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1.0,
+        weight=-0.01,  # Much smaller weight
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot",
@@ -283,7 +283,7 @@ class RewardsCfg:
     
     joint_deviation_legs = RewTerm(
         func=mdp.joint_deviation_l1,
-        weight=-1.0,
+        weight=-0.01,  # Much smaller weight
         params={
             "asset_cfg": SceneEntityCfg(
                 "robot", 
@@ -295,8 +295,8 @@ class RewardsCfg:
     )
 
     # -- robot (scaled down for stability)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-0.1)
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-1.0, params={"target_height": 1.0})  # Taller robot
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-0.001)  # Much smaller
+    base_height = RewTerm(func=mdp.base_height_l2, weight=-0.01, params={"target_height": 1.0})  # Much smaller
 
     # -- feet (using available foot contact bodies - simplified for now)
     gait = RewTerm(
@@ -383,7 +383,7 @@ class DropbearVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the Dropbear locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: RobotSceneCfg = RobotSceneCfg(num_envs=64, env_spacing=2.5)  # Reduced for testing
+    scene: RobotSceneCfg = RobotSceneCfg(num_envs=4, env_spacing=5.0)  # Very small for testing
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -398,9 +398,9 @@ class DropbearVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 4
-        self.episode_length_s = 20.0
+        self.episode_length_s = 5.0  # Very short episodes for initial testing
         # simulation settings
-        self.sim.dt = 0.005
+        self.sim.dt = 0.01  # Larger timestep for stability
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15

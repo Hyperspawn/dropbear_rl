@@ -46,7 +46,7 @@ class DropbearVelocityRoughPPORunnerCfg(BasePPORunnerCfg):
         super().__post_init__()
         
         # Neural network architecture - larger for complex humanoid control
-        self.policy.init_noise_std = 0.5  # Conservative initial exploration
+        self.policy.init_noise_std = 0.5  # Conservative initial exploration to prevent std=0
         self.policy.actor_hidden_dims = [512, 512, 256]  # Large actor network
         self.policy.critic_hidden_dims = [512, 512, 256]  # Large critic network
         self.policy.activation = "elu"  # ELU activation for smooth gradients
@@ -54,13 +54,13 @@ class DropbearVelocityRoughPPORunnerCfg(BasePPORunnerCfg):
         # PPO algorithm parameters tuned for humanoid stability
         self.algorithm.value_loss_coef = 1.0  # Standard value loss coefficient
         self.algorithm.use_clipped_value_loss = True  # Clip value loss for stability
-        self.algorithm.clip_param = 0.2  # Conservative clipping for stable updates
-        self.algorithm.entropy_coef = 0.01  # Moderate entropy for exploration
-        self.algorithm.num_learning_epochs = 3  # Fewer epochs to prevent overfitting
+        self.algorithm.clip_param = 0.1  # Very conservative clipping to prevent std=0
+        self.algorithm.entropy_coef = 0.05  # Higher entropy to maintain exploration
+        self.algorithm.num_learning_epochs = 2  # Fewer epochs to prevent overfitting
         self.algorithm.num_mini_batches = 4  # Mini-batch size for gradient updates
         self.algorithm.learning_rate = 1.0e-4  # Conservative learning rate
-        self.algorithm.schedule = "adaptive"  # Adaptive learning rate schedule
+        self.algorithm.schedule = "fixed"  # Fixed learning rate for stability
         self.algorithm.gamma = 0.99  # Standard discount factor
         self.algorithm.lam = 0.95  # GAE lambda for advantage estimation
-        self.algorithm.desired_kl = 0.01  # Conservative KL divergence target
-        self.algorithm.max_grad_norm = 0.5  # Gradient clipping for stability
+        self.algorithm.desired_kl = 0.005  # Very conservative KL divergence target
+        self.algorithm.max_grad_norm = 0.5  # Strong gradient clipping for stability

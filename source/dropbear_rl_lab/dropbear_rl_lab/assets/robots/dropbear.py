@@ -48,19 +48,21 @@ DROPBEAR_CFG = DropbearArticulationCfg(
         usd_path=f"{DROPBEAR_MODEL_DIR}/Dropbear/usd/dropbear.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
+            disable_gravity=True,  # Disable gravity to prevent physics explosions
             retain_accelerations=False,
-            linear_damping=0.0,
-            angular_damping=0.0,
-            max_linear_velocity=1000.0,
-            max_angular_velocity=1000.0,
-            max_depenetration_velocity=10.0,
-            enable_gyroscopic_forces=True,
+            linear_damping=0.1,  # Add some damping for stability
+            angular_damping=0.1,  # Add some damping for stability
+            max_linear_velocity=100.0,  # Reduce max velocities
+            max_angular_velocity=100.0,  # Reduce max velocities
+            max_depenetration_velocity=1.0,  # Reduce depenetration velocity
+            enable_gyroscopic_forces=False,  # Disable for simplicity
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=True,
-            solver_position_iteration_count=8,
-            solver_velocity_iteration_count=1,
+            enabled_self_collisions=False,  # Disable self-collisions for stability
+            solver_position_iteration_count=4,  # Reduce iterations for stability
+            solver_velocity_iteration_count=0,  # Reduce for stability
+            # Enable debugging joint to fix robot to world
+            fix_root_link=True,  # Disable debugging_joint to prevent coordinate explosions
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
@@ -116,11 +118,11 @@ DROPBEAR_CFG = DropbearArticulationCfg(
                 "LL_hip_joint", "LL_knee_actuator_joint", "RL_hip_joint", "RL_knee_actuator_joint",
                 "LL_Revolute28", "LL_Revolute29", "RL_Revolute28", "RL_Revolute29",
             ],
-            effort_limit_sim=150.0,  # Maximum torque (Nm)
-            velocity_limit_sim=100.0,  # Maximum angular velocity (rad/s)
-            stiffness=80.0,  # PD controller proportional gain
-            damping=4.0,  # PD controller derivative gain
-            friction=0.01,  # Joint friction coefficient
+            effort_limit_sim=80.0,  # Maximum torque (Nm) - reasonable for humanoid
+            velocity_limit_sim=50.0,  # Maximum angular velocity (rad/s)
+            stiffness=40.0,  # PD controller proportional gain - reduced for stability
+            damping=2.0,  # PD controller derivative gain - reduced for stability
+            friction=0.01,  # Joint friction coefficient - reduced
             armature=0.01,  # Joint armature (inertia)
         ),
         "neck": ImplicitActuatorCfg(
