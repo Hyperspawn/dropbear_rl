@@ -1,7 +1,7 @@
 # Copyright (c) 2025, Hyperspawn Robotics.
 # All rights reserved.
 #
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: CC-BY-NC-SA-4.0
 
 """Configuration for Dropbear humanoid robot.
 
