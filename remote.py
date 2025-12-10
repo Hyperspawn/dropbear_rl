@@ -158,8 +158,19 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8721, help="Port to listen on.")
     parser.add_argument("--target-host", type=str, default="", help="Local app host to connect to for reverse remote.")
     parser.add_argument("--target-port", type=int, default=8765, help="Local app port for reverse remote.")
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Prompt for the reverse listener host:port before connecting.",
+    )
     args = parser.parse_args()
-    if args.target_host:
+    if args.reverse or args.target_host:
+        target_host = args.target_host
+        target_port = args.target_port
+        if args.reverse or not target_host:
+            target_host, target_port = _prompt_reverse_target(target_port)
+        run_reverse_agent(target_host, target_port)
+        return
         run_reverse_agent(args.target_host, args.target_port)
         return
     server = RemoteServer((args.host, args.port), RemoteRequestHandler)
@@ -178,6 +189,30 @@ def main() -> None:
         pass
     finally:
         server.shutdown()
+
+
+def _prompt_reverse_target(default_port: int) -> Tuple[str, int]:
+    prompt = (
+        "\nPaste the reverse listener target that the RTX app is exposing (host[:port]).\n"
+        f"Leave blank to cancel. Default port is {default_port}: "
+    )
+    try:
+        response = input(prompt).strip()
+    except EOFError:
+        raise RuntimeError("Reverse target prompt aborted.")
+    if not response:
+        raise RuntimeError("No reverse listener provided.")
+    parts = response.split(":")
+    host = parts[0].strip()
+    port = default_port
+    if len(parts) > 1:
+        try:
+            port = int(parts[1])
+        except ValueError:
+            raise RuntimeError(f"Invalid port: {parts[1]}")
+    if not host:
+        raise RuntimeError("Reverse listener host is empty.")
+    return host, port
 
 
 def run_reverse_agent(target_host: str, target_port: int) -> None:
