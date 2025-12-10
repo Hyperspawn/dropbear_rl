@@ -1,6 +1,7 @@
 """Remote IsaacLab runner that listens for commands from the local controller."""
 
 import argparse
+import curses
 import json
 import os
 import socket
@@ -71,6 +72,106 @@ def _stream_command(
     _send_payload(writer, {"type": "exit", "code": return_code})
 
 
+def _run_direct_server(host: str, port: int) -> None:
+    server = RemoteServer((host, port), RemoteRequestHandler)
+    advertised_host = host
+    if host in ("0.0.0.0", ""):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as test_sock:
+                test_sock.connect(("8.8.8.8", 80))
+                advertised_host = test_sock.getsockname()[0]
+        except Exception:
+            advertised_host = host
+    print(f"[remote] Listening on {host}:{port} (reachable via {advertised_host}:{port})")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown()
+
+
+def _parse_host_port(value: str, default_port: int) -> Tuple[str, int]:
+    parts = value.strip().split(":")
+    host = parts[0].strip()
+    if not host:
+        raise ValueError("Host cannot be empty.")
+    port = default_port
+    if len(parts) > 1 and parts[1].strip():
+        port = int(parts[1].strip())
+    return host, port
+
+
+def _curses_prompt(stdscr: curses._CursesWindow, prompt: str, default: str) -> Optional[str]:
+    curses.echo()
+    curses.curs_set(1)
+    stdscr.erase()
+    stdscr.addstr(0, 0, prompt)
+    stdscr.addstr(2, 0, f"(default: {default})")
+    stdscr.refresh()
+    try:
+        line = stdscr.getstr(4, 0, 64)
+    finally:
+        curses.noecho()
+        curses.curs_set(0)
+    if not line:
+        return None
+    return line.decode("utf-8", errors="ignore").strip()
+
+
+def run_curses_menu(stdscr: curses._CursesWindow, args) -> Tuple[Optional[str], dict]:
+    curses.curs_set(0)
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(1, curses.COLOR_GREEN, -1)
+    curses.init_pair(2, curses.COLOR_YELLOW, -1)
+
+    options = ["Start direct server", "Start reverse agent", "Quit"]
+    selected = 0
+    reverse_target = args.target_host
+    reverse_port = args.target_port
+    error_msg: Optional[str] = None
+    while True:
+        stdscr.erase()
+        height, width = stdscr.getmaxyx()
+        stdscr.addstr(0, 0, "Remote runner menu", curses.color_pair(1) | curses.A_BOLD)
+        for idx, desc in enumerate(options):
+            attr = curses.A_REVERSE if idx == selected else curses.A_NORMAL
+            stdscr.addstr(2 + idx, 2, f"{'> ' if idx == selected else '  '}{desc}", attr)
+        stdscr.addstr(6, 2, f"Direct listen: {args.host}:{args.port}")
+        stdscr.addstr(7, 2, f"Reverse target: {reverse_target or 'not set'}:{reverse_port}")
+        if error_msg:
+            stdscr.addstr(9, 2, error_msg[: max(0, width - 4)], curses.color_pair(2))
+        stdscr.addstr(height - 2, 2, "Use ↑/↓ to choose, Enter to activate, q to exit.", curses.A_DIM)
+        stdscr.refresh()
+
+        key = stdscr.getch()
+        if key in (curses.KEY_UP, ord("k")):
+            selected = (selected - 1) % len(options)
+        elif key in (curses.KEY_DOWN, ord("j")):
+            selected = (selected + 1) % len(options)
+        elif key in (10, 13):
+            if selected == 0:
+                return "server", {}
+            elif selected == 1:
+                prompt = "Enter reverse listener target (host[:port]) or leave blank to cancel:"
+                response = _curses_prompt(stdscr, prompt, f"{reverse_target or 'host'}:{reverse_port}")
+                if not response:
+                    continue
+                try:
+                    host, port = _parse_host_port(response, reverse_port)
+                except ValueError as exc:
+                    error_msg = f"Invalid input: {exc}"
+                    continue
+                reverse_target = host
+                reverse_port = port
+                return "reverse", {"host": host, "port": port}
+            else:
+                return None, {}
+        elif key in (ord("q"), 27):
+            return None, {}
+        else:
+            error_msg = None
 def _prepare_env() -> Dict[str, str]:
     return prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
 
@@ -163,7 +264,21 @@ def main() -> None:
         action="store_true",
         help="Prompt for the reverse listener host:port before connecting.",
     )
+    parser.add_argument("--menu", dest="menu", action="store_true", help="Use the curses menu.")
+    parser.add_argument("--no-menu", dest="menu", action="store_false", help="Skip the curses menu.")
+    parser.set_defaults(menu=sys.stdin.isatty())
     args = parser.parse_args()
+
+    if args.menu and sys.stdin.isatty():
+        action, payload = curses.wrapper(run_curses_menu, args)
+        if action == "server":
+            _run_direct_server(args.host, args.port)
+            return
+        if action == "reverse":
+            run_reverse_agent(payload["host"], payload["port"])
+            return
+        return
+
     if args.reverse or args.target_host:
         target_host = args.target_host
         target_port = args.target_port
@@ -171,24 +286,8 @@ def main() -> None:
             target_host, target_port = _prompt_reverse_target(target_port)
         run_reverse_agent(target_host, target_port)
         return
-        run_reverse_agent(args.target_host, args.target_port)
-        return
-    server = RemoteServer((args.host, args.port), RemoteRequestHandler)
-    advertised_host = args.host
-    if args.host in ("0.0.0.0", ""):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as test_sock:
-                test_sock.connect(("8.8.8.8", 80))
-                advertised_host = test_sock.getsockname()[0]
-        except Exception:
-            advertised_host = "0.0.0.0"
-    print(f"[remote] Listening on {args.host}:{args.port} (reachable via {advertised_host}:{args.port})")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.shutdown()
+
+    _run_direct_server(args.host, args.port)
 
 
 def _prompt_reverse_target(default_port: int) -> Tuple[str, int]:

@@ -30,6 +30,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -326,6 +327,11 @@ def _get_local_ipv4_candidates() -> list[str]:
     if primary:
         ips.add(primary)
     return sorted(ips)
+
+
+def _handle_interrupt(signum: int, frame) -> None:
+    remote_client.stop_reverse_listener()
+    raise KeyboardInterrupt
 
 def _default_training_config_entry() -> dict:
     return {field["path"]: field["default"] for field in TRAINING_CONFIG_FIELDS}
@@ -1060,6 +1066,7 @@ def run_curses_interface() -> Optional[list[str]]:
             listener_error = None
             try:
                 remote_client.ensure_reverse_listener()
+                remote_settings.update(remote_client.get_remote_config())
             except Exception as exc:
                 listener_error = f"Reverse listener error: {exc}"
 
@@ -1194,6 +1201,10 @@ def run_curses_interface() -> Optional[list[str]]:
                 remote_client.save_remote_config(remote_settings)
                 if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
                     activate_reverse_listener()
+                else:
+                    remote_client.stop_reverse_listener()
+                if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
+                    activate_reverse_listener()
             elif key == ord("R"):
                 configure_remote_target(stdscr)
             elif key == ord("t"):
@@ -1204,11 +1215,18 @@ def run_curses_interface() -> Optional[list[str]]:
                 return None
 
     interactive_args: Optional[list[str]]
+    handlers: dict[int, object] = {}
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        handlers[sig] = signal.getsignal(sig)
+        signal.signal(sig, _handle_interrupt)
     try:
         interactive_args = curses.wrapper(wrap_menu)
     except curses.error:
         interactive_args = None
     finally:
+        remote_client.stop_reverse_listener()
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
         training_configs["last_used"] = training_active_name
         save_training_configs(training_configs)
     return interactive_args

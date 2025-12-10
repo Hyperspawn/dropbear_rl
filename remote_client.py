@@ -1,6 +1,7 @@
 """Client helpers for dispatching commands to a remote RL executor."""
 
 import json
+import random
 import socket
 import subprocess
 import uuid
@@ -104,6 +105,21 @@ def _normalize_command(cmd: Iterable[str]) -> List[str]:
     return normalized
 
 
+def _pick_free_port(preferred: int) -> int:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("0.0.0.0", preferred))
+            return sock.getsockname()[1]
+    except OSError:
+        pass
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("0.0.0.0", 0))
+        return sock.getsockname()[1]
+
+
 def _remote_log(msg: str) -> None:
     print(f"[remote] {msg.rstrip()}", flush=True)
 
@@ -154,7 +170,15 @@ def _dispatch_direct(cmd: Iterable[str], description: Optional[str]) -> subproce
 def _ensure_reverse_bridge() -> None:
     cfg = _load_remote_config()
     port = get_reverse_port()
-    reverse_remote.ensure_bridge("0.0.0.0", port, _remote_log, _remote_ack)
+    try:
+        reverse_remote.ensure_bridge("0.0.0.0", port, _remote_log, _remote_ack)
+    except OSError as exc:
+        reverse_remote.stop_bridge()
+        new_port = _pick_free_port(port)
+        if new_port != port:
+            cfg["reverse_port"] = new_port
+            save_remote_config(cfg)
+        reverse_remote.ensure_bridge("0.0.0.0", new_port, _remote_log, _remote_ack)
 
 
 def _dispatch_reverse(cmd: Iterable[str], description: Optional[str]) -> subprocess.CompletedProcess:
@@ -200,3 +224,7 @@ def is_reverse_listener_active() -> bool:
     if reverse_remote.is_agent_available():
         return True
     return False
+
+
+def stop_reverse_listener() -> None:
+    reverse_remote.stop_bridge()

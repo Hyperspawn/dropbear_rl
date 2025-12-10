@@ -157,3 +157,10 @@ def bridge_address() -> Tuple[str, int]:
     if _bridge is None:
         raise RuntimeError("Reverse bridge is not running.")
     return (_bridge.host, _bridge.port)
+
+
+def stop_bridge() -> None:
+    global _bridge
+    if _bridge is not None:
+        _bridge.stop()
+        _bridge = None
