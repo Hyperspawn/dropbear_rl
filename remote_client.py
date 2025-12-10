@@ -103,6 +103,8 @@ def dispatch_remote(cmd: Iterable[str], description: Optional[str] = None) -> su
                         print(f"[remote] {msg.get('message', '').rstrip()}", flush=True)
                     elif typ == "start":
                         print(f"[remote] {msg.get('description', 'run started')}", flush=True)
+                    elif typ == "ack":
+                        print(f"[remote] ack: {msg.get('message', '').rstrip()}", flush=True)
                     elif typ == "exit":
                         return_code = int(msg.get("code", 0))
                         break

@@ -32,6 +32,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -834,7 +836,33 @@ def run_curses_interface() -> Optional[list[str]]:
             cfg_port = int(cfg_port_value)
         except Exception:
             cfg_port = remote_client.DEFAULT_REMOTE_CONFIG["port"]
-        success, info = remote_client.test_remote_connection(cfg_host, cfg_port)
+
+        spinner_chars = "|/-\\"
+        spinner_idx = 0
+        result = {"done": False, "success": False, "info": "pending"}
+
+        def _test_connection() -> None:
+            success, info = remote_client.test_remote_connection(cfg_host, cfg_port)
+            result["success"] = success
+            result["info"] = info
+            result["done"] = True
+
+        worker = threading.Thread(target=_test_connection, daemon=True)
+        worker.start()
+        while not result["done"]:
+            stdscr.erase()
+            stdscr.addstr(0, 0, "Testing remote connection...", curses.A_BOLD)
+            stdscr.addstr(
+                2,
+                0,
+                f"{spinner_chars[spinner_idx % len(spinner_chars)]} Connecting to {cfg_host}:{cfg_port}",
+            )
+            spinner_idx += 1
+            stdscr.refresh()
+            time.sleep(0.1)
+        worker.join()
+        success = result["success"]
+        info = result["info"]
         remote_client.save_remote_config(remote_settings)
 
         msg = "Remote target reachable" if success else f"Remote handshake failed: {info}"

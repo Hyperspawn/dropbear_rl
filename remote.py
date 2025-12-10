@@ -52,6 +52,7 @@ class RemoteRequestHandler(socketserver.StreamRequestHandler):
             self._send({"type": "error", "message": "Invalid command payload."})
             return
         description = request.get("description", "remote run")
+        self._send({"type": "ack", "message": "Remote server received request and is preparing IsaacLab."})
         self._send({"type": "start", "description": description})
         resolved_cmd = self._resolve_command(cmd)
         try:
