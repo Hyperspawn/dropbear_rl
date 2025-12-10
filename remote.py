@@ -8,6 +8,7 @@ import socket
 import socketserver
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -318,30 +319,32 @@ def run_reverse_agent(target_host: str, target_port: int) -> None:
     if not target_host or target_port <= 0:
         raise RuntimeError("Reverse target host and port must be provided.")
     env = _prepare_env()
-    try:
-        with socket.create_connection((target_host, target_port), timeout=5) as sock:
-            reader = sock.makefile("rb")
-            writer = sock.makefile("wb")
-            _send_payload(
-                writer,
-                {
-                    "type": "handshake",
-                    "session_id": str(uuid.uuid4()),
-                    "description": f"reverse agent {socket.gethostname()}",
-                },
-            )
-            _send_payload(writer, {"type": "ack", "message": "Remote agent ready and awaiting commands."})
-            for msg in remote_protocol.iter_messages(reader):
-                if msg.get("type") != "command":
-                    continue
-                cmd = msg.get("cmd")
-                if not isinstance(cmd, list):
-                    _send_payload(writer, {"type": "error", "message": "Invalid command payload."})
-                    continue
-                resolved_cmd = resolve_command(cmd)
-                _stream_command(resolved_cmd, msg.get("description"), env, writer)
-    except Exception as exc:
-        print(f"[remote] Reverse agent connection failed: {exc}", flush=True)
-        sys.exit(1)
+    while True:
+        try:
+            with socket.create_connection((target_host, target_port), timeout=5) as sock:
+                reader = sock.makefile("rb")
+                writer = sock.makefile("wb")
+                _send_payload(
+                    writer,
+                    {
+                        "type": "handshake",
+                        "session_id": str(uuid.uuid4()),
+                        "description": f"reverse agent {socket.gethostname()}",
+                    },
+                )
+                _send_payload(writer, {"type": "ack", "message": "Remote agent ready and awaiting commands."})
+                for msg in remote_protocol.iter_messages(reader):
+                    if msg.get("type") != "command":
+                        continue
+                    cmd = msg.get("cmd")
+                    if not isinstance(cmd, list):
+                        _send_payload(writer, {"type": "error", "message": "Invalid command payload."})
+                        continue
+                    resolved_cmd = resolve_command(cmd)
+                    _stream_command(resolved_cmd, msg.get("description"), env, writer)
+                return
+        except Exception as exc:
+            print(f"[remote] Reverse agent connection failed: {exc}, retrying in 2s...", flush=True)
+            time.sleep(2)
 if __name__ == "__main__":
     main()

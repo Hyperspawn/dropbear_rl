@@ -105,6 +105,18 @@ def _normalize_command(cmd: Iterable[str]) -> List[str]:
     return normalized
 
 
+_listener_status: str = "waiting for agent"
+
+
+def get_listener_status() -> str:
+    return _listener_status
+
+
+def reset_listener_status() -> None:
+    global _listener_status
+    _listener_status = "waiting for agent"
+
+
 def _pick_free_port(preferred: int) -> int:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -122,10 +134,15 @@ def _pick_free_port(preferred: int) -> int:
 
 def _remote_log(msg: str) -> None:
     print(f"[remote] {msg.rstrip()}", flush=True)
+    if "Remote handshake" in msg:
+        global _listener_status
+        _listener_status = msg.strip()
 
 
 def _remote_ack(msg: str) -> None:
     print(f"[remote] ack: {msg.rstrip()}", flush=True)
+    global _listener_status
+    _listener_status = msg.strip()
 
 
 def _dispatch_direct(cmd: Iterable[str], description: Optional[str]) -> subprocess.CompletedProcess:
@@ -170,6 +187,7 @@ def _dispatch_direct(cmd: Iterable[str], description: Optional[str]) -> subproce
 def _ensure_reverse_bridge() -> None:
     cfg = _load_remote_config()
     port = get_reverse_port()
+    reset_listener_status()
     try:
         reverse_remote.ensure_bridge("0.0.0.0", port, _remote_log, _remote_ack)
     except OSError as exc:
@@ -228,3 +246,4 @@ def is_reverse_listener_active() -> bool:
 
 def stop_reverse_listener() -> None:
     reverse_remote.stop_bridge()
+    reset_listener_status()

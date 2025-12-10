@@ -1123,6 +1123,7 @@ def run_curses_interface() -> Optional[list[str]]:
             local_ips = _get_local_ipv4_candidates()
             local_ip = local_ips[0] if local_ips else "127.0.0.1"
             listener_status = "connected" if reverse_remote.is_agent_available() else "waiting"
+            listener_note = remote_client.get_listener_status()
             options = [
                 f"[h] Headless: {'ON' if headless else 'OFF'}",
                 f"[v] Video capture: {'ON' if video else 'OFF'}",
@@ -1143,6 +1144,14 @@ def run_curses_interface() -> Optional[list[str]]:
                 if row >= height - 3:
                     break
                 stdscr.addstr(row, 5, text[: max(0, width - 8)])
+            status_row = info_row + len(options)
+            if status_row < height - 3:
+                status_text = listener_note[: max(0, width - 10)]
+                stdscr.addstr(
+                    status_row,
+                    5,
+                    f"Listener status: {status_text}",
+                )
 
             footer = "[Enter] Run   [q] Quit"
             stdscr.addstr(height - 1, max(2, (width - len(footer)) // 2), footer, curses.color_pair(1))
