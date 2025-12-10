@@ -55,8 +55,8 @@ class RemoteRequestHandler(socketserver.StreamRequestHandler):
         self._send({"type": "start", "description": description})
         resolved_cmd = self._resolve_command(cmd)
         try:
-        env = prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
-        process = subprocess.Popen(
+            env = prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
+            process = subprocess.Popen(
             resolved_cmd,
             cwd=PROJECT_ROOT,
             env=env,
