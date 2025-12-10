@@ -9,6 +9,7 @@ import socket
 import socketserver
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -74,24 +75,21 @@ def _stream_command(
     _send_payload(writer, {"type": "exit", "code": return_code})
 
 
-def _pick_accessible_port(preferred: int, max_attempts: int = 40) -> int:
-    for offset in range(max_attempts):
-        candidate = preferred + offset
-        if candidate > 65535:
-            break
+def _pick_accessible_port(preferred: int, max_port: int = 5006) -> int:
+    upper = min(max_port, 65535)
+    for candidate in range(preferred, upper + 1):
         with contextlib.suppress(OSError):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tester:
                 tester.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 tester.bind(("0.0.0.0", candidate))
                 return candidate
-    raise RuntimeError(f"Could not bind any port starting at {preferred}.")
+    raise RuntimeError(f"Could not bind any port between {preferred} and {max_port}.")
 
 
 def _run_direct_server(host: str, port: int) -> None:
-    accessible_port = _pick_accessible_port(port)
+    accessible_port = _pick_accessible_port(port, max_port=5006)
     if accessible_port != port:
         print(f"[remote] Port {port} busy; using {accessible_port} instead.")
-    server = RemoteServer((host, accessible_port), RemoteRequestHandler)
     advertised_host = host
     if host in ("0.0.0.0", ""):
         try:
@@ -100,12 +98,16 @@ def _run_direct_server(host: str, port: int) -> None:
                 advertised_host = test_sock.getsockname()[0]
         except Exception:
             advertised_host = host
-    print(f"[remote] Listening on {host}:{port} (reachable via {advertised_host}:{port})")
+    responder = DiscoveryResponder(advertised_host, accessible_port)
+    responder.start()
+    server = RemoteServer((host, accessible_port), RemoteRequestHandler)
+    print(f"[remote] Listening on {host}:{accessible_port} (reachable via {advertised_host}:{accessible_port})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        responder.stop()
         server.shutdown()
 
 
@@ -118,6 +120,47 @@ def _parse_host_port(value: str, default_port: int) -> Tuple[str, int]:
     if len(parts) > 1 and parts[1].strip():
         port = int(parts[1].strip())
     return host, port
+
+
+DISCOVERY_PORT = 5005
+
+
+class DiscoveryResponder(threading.Thread):
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(daemon=True)
+        self._host = host
+        self._port = port
+        self._sock: Optional[socket.socket] = None
+        self._running = threading.Event()
+
+    def run(self) -> None:
+        self._running.set()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(0.5)
+        sock.bind(("0.0.0.0", DISCOVERY_PORT))
+        self._sock = sock
+        while self._running.is_set():
+            try:
+                raw, addr = sock.recvfrom(1024)
+            except socket.timeout:
+                continue
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except Exception:
+                continue
+            if payload.get("type") != "discover":
+                continue
+            response = json.dumps(
+                {"type": "discover_response", "host": self._host, "port": self._port}
+            ).encode("utf-8")
+            sock.sendto(response, addr)
+
+    def stop(self) -> None:
+        self._running.clear()
+        if self._sock:
+            self._sock.close()
 
 
 def _curses_prompt(stdscr: Any, prompt: str, default: str) -> Optional[str]:

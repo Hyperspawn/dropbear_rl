@@ -4,6 +4,7 @@ import json
 import random
 import socket
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -17,9 +18,17 @@ DEFAULT_REMOTE_CONFIG = {
     "enabled": False,
     "mode": "reverse",
     "host": "127.0.0.1",
-    "port": 5010,
-    "reverse_port": 8765,
+    "port": 5003,
+    "reverse_port": 5004,
 }
+
+DISCOVERY_PORT = 5005
+DISCOVERY_STATUS_IDLE = "idle"
+DISCOVERY_STATUS_SCANNING = "scanning for remote"
+DISCOVERY_STATUS_FOUND = "remote discovered"
+DISCOVERY_STATUS_FAILED = "discovery failed"
+
+REVERSE_PORT_CANDIDATES = [5004, 5005, 5006]
 
 _remote_config_cache: Optional[Dict[str, object]] = None
 
@@ -105,6 +114,57 @@ def _normalize_command(cmd: Iterable[str]) -> List[str]:
     return normalized
 
 
+_discovery_status: str = DISCOVERY_STATUS_IDLE
+
+
+def get_discovery_status() -> str:
+    return _discovery_status
+
+
+def _set_discovery_status(value: str) -> None:
+    global _discovery_status
+    _discovery_status = value
+
+
+def discover_remote_agent(timeout: float = 1.0, attempts: int = 3) -> Optional[Tuple[str, int]]:
+    msg = json.dumps({"type": "discover"}).encode("utf-8")
+    for _ in range(attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sock.bind(("0.0.0.0", 0))
+                sock.settimeout(timeout)
+                sock.sendto(msg, ("255.255.255.255", DISCOVERY_PORT))
+                raw, _ = sock.recvfrom(2048)
+                data = json.loads(raw.decode("utf-8"))
+                if data.get("type") == "discover_response":
+                    host = data.get("host")
+                    port = data.get("port")
+                    if host and port:
+                        return host, int(port)
+        except (socket.timeout, json.JSONDecodeError, OSError):
+            continue
+    return None
+
+
+def auto_discover_remote(timeout: float = 1.0) -> Optional[Tuple[str, int]]:
+    _set_discovery_status(DISCOVERY_STATUS_SCANNING)
+    result = discover_remote_agent(timeout=timeout)
+    if result:
+        host, port = result
+        ok, info = test_remote_connection(host, port, timeout=0.5)
+        if ok:
+            _set_discovery_status(f"{DISCOVERY_STATUS_FOUND}: {host}:{port}")
+            cfg = _load_remote_config()
+            cfg["host"] = host
+            cfg["port"] = port
+            save_remote_config(cfg)
+            return host, port
+        _set_discovery_status(DISCOVERY_STATUS_FAILED)
+        return None
+    _set_discovery_status(DISCOVERY_STATUS_FAILED)
+    return None
 _listener_status: str = "waiting for agent"
 
 
@@ -118,14 +178,15 @@ def reset_listener_status() -> None:
 
 
 def _pick_free_port(preferred: int) -> int:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind(("0.0.0.0", preferred))
-            return sock.getsockname()[1]
-    except OSError:
-        pass
-
+    candidates = [preferred] + [p for p in REVERSE_PORT_CANDIDATES if p != preferred]
+    for candidate in candidates:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind(("0.0.0.0", candidate))
+                return sock.getsockname()[1]
+        except OSError:
+            continue
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("0.0.0.0", 0))
@@ -186,17 +247,24 @@ def _dispatch_direct(cmd: Iterable[str], description: Optional[str]) -> subproce
 
 def _ensure_reverse_bridge() -> None:
     cfg = _load_remote_config()
-    port = get_reverse_port()
+    preferred_port = get_reverse_port()
     reset_listener_status()
-    try:
-        reverse_remote.ensure_bridge("0.0.0.0", port, _remote_log, _remote_ack)
-    except OSError as exc:
-        reverse_remote.stop_bridge()
-        new_port = _pick_free_port(port)
-        if new_port != port:
-            cfg["reverse_port"] = new_port
-            save_remote_config(cfg)
-        reverse_remote.ensure_bridge("0.0.0.0", new_port, _remote_log, _remote_ack)
+    attempted: set[int] = set()
+    current_port = preferred_port
+    while True:
+        try:
+            reverse_remote.ensure_bridge("0.0.0.0", current_port, _remote_log, _remote_ack)
+            if current_port != preferred_port:
+                cfg["reverse_port"] = current_port
+                save_remote_config(cfg)
+            return
+        except OSError:
+            reverse_remote.stop_bridge()
+            attempted.add(current_port)
+            next_port = _pick_free_port(preferred_port)
+            if next_port in attempted:
+                raise RuntimeError("Failed to bind reverse listener.")
+            current_port = next_port
 
 
 def _dispatch_reverse(cmd: Iterable[str], description: Optional[str]) -> subprocess.CompletedProcess:

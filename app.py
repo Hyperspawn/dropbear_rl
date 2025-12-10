@@ -1045,6 +1045,7 @@ def run_curses_interface() -> Optional[list[str]]:
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_GREEN, -1)
         curses.init_pair(2, curses.COLOR_YELLOW, -1)
+        nonlocal remote_settings
 
         runs = DROPBEAR_RUNS
         selected = runs.index("dropbear_quick_test") if "dropbear_quick_test" in runs else 0
@@ -1116,6 +1117,9 @@ def run_curses_interface() -> Optional[list[str]]:
                 stdscr.addstr(3 + idx, 5, f"{prefix} {run}", attr)
 
             info_row = 3 + len(runs) + 1
+            if remote_settings.get("enabled") and remote_settings.get("mode") == "direct":
+                remote_client.auto_discover_remote()
+                remote_settings = remote_client.get_remote_config()
             remote_enabled = bool(remote_settings.get("enabled"))
             remote_host = remote_settings.get("host", "")
             remote_port = remote_settings.get("port", "")
@@ -1124,6 +1128,7 @@ def run_curses_interface() -> Optional[list[str]]:
             local_ip = local_ips[0] if local_ips else "127.0.0.1"
             listener_status = "connected" if reverse_remote.is_agent_available() else "waiting"
             listener_note = remote_client.get_listener_status()
+            discovery_note = remote_client.get_discovery_status()
             options = [
                 f"[h] Headless: {'ON' if headless else 'OFF'}",
                 f"[v] Video capture: {'ON' if video else 'OFF'}",
@@ -1137,6 +1142,7 @@ def run_curses_interface() -> Optional[list[str]]:
                 f"[t] Training config: {training_active_name}",
                 f"[r] Remote compute: {'ON' if remote_enabled else 'OFF'}",
                 f"[R] Remote host: {remote_host}:{remote_port}",
+                f"Discovery: {discovery_note}",
                 f"Reverse listener: {local_ip}:{reverse_port} ({listener_status})",
             ]
             for idx, text in enumerate(options):
@@ -1212,6 +1218,9 @@ def run_curses_interface() -> Optional[list[str]]:
                     activate_reverse_listener()
                 else:
                     remote_client.stop_reverse_listener()
+                if remote_settings.get("enabled") and remote_settings.get("mode") == "direct":
+                    remote_client.auto_discover_remote()
+                    remote_settings = remote_client.get_remote_config()
                 if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
                     activate_reverse_listener()
             elif key == ord("R"):
