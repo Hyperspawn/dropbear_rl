@@ -77,7 +77,10 @@ def _stream_command(
 
 def _pick_accessible_port(preferred: int, max_port: int = 5006) -> int:
     upper = min(max_port, 65535)
-    for candidate in range(preferred, upper + 1):
+    start = preferred
+    if preferred > upper:
+        start = max(5003, upper - (max_port - 5003))
+    for candidate in range(start, upper + 1):
         with contextlib.suppress(OSError):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tester:
                 tester.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -315,11 +318,9 @@ def boot_remote_venv() -> None:
 
 def main() -> None:
     boot_remote_venv()
-    if os.geteuid() != 0:
-        raise SystemExit("Remote runner must be started as root (sudo) to enable bidirectional comms.")
     parser = argparse.ArgumentParser(description="Remote Dropbear RL server.")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host/interface to listen on.")
-    parser.add_argument("--port", type=int, default=8721, help="Port to listen on.")
+    parser.add_argument("--port", type=int, default=5003, help="Port to listen on.")
     parser.add_argument("--target-host", type=str, default="", help="Local app host to connect to for reverse remote.")
     parser.add_argument("--target-port", type=int, default=8765, help="Local app port for reverse remote.")
     parser.add_argument(
