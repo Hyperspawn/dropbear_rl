@@ -735,19 +735,6 @@ def run_curses_interface() -> Optional[list[str]]:
             return None
         selected = 0
         offset = 0
-        def configure_remote_target(stdscr: "curses._CursesWindow") -> None:
-            value = prompt_for_config_name(stdscr, "Remote target (host:port):")
-            if not value:
-                return
-            parts = value.split(":")
-            remote_settings["host"] = parts[0].strip()
-            if len(parts) > 1:
-                try:
-                    remote_settings["port"] = int(parts[1])
-                except Exception:
-                    pass
-            remote_client.save_remote_config(remote_settings)
-
         while True:
             stdscr.erase()
             height, width = stdscr.getmaxyx()
@@ -826,6 +813,19 @@ def run_curses_interface() -> Optional[list[str]]:
                 return names[selected_idx]
             elif key in (ord("q"), 27):
                 return None
+
+    def configure_remote_target(stdscr: "curses._CursesWindow") -> None:
+        value = prompt_for_config_name(stdscr, "Remote target (host:port):")
+        if not value:
+            return
+        parts = value.split(":")
+        remote_settings["host"] = parts[0].strip()
+        if len(parts) > 1:
+            try:
+                remote_settings["port"] = int(parts[1])
+            except Exception:
+                pass
+        remote_client.save_remote_config(remote_settings)
 
     def training_config_menu(stdscr: "curses._CursesWindow") -> None:
         nonlocal training_active_name
