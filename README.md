@@ -39,6 +39,9 @@ Dropbear RL Lab is a reinforcement learning framework for Dropbear robot. Run us
 - **NVIDIA GPU** with CUDA support
 - **Python 3.10+**
 
+<img width="1224" height="549" alt="image" src="https://github.com/user-attachments/assets/73b2f272-2572-4819-9af7-494ae9efa777" />
+
+
 ## 🧳 Quickstart
 ```bash
 git clone https://github.com/hyperspawn/dropbear_rl.git
