@@ -819,18 +819,36 @@ def run_curses_interface() -> Optional[list[str]]:
         if not value:
             return
         parts = value.split(":")
-        remote_settings["host"] = parts[0].strip()
+        host = parts[0].strip()
+        if host:
+            remote_settings["host"] = host
         if len(parts) > 1:
             try:
                 remote_settings["port"] = int(parts[1])
             except Exception:
                 pass
+
+        cfg_host = remote_settings.get("host", "")
+        cfg_port_value = remote_settings.get("port", remote_client.DEFAULT_REMOTE_CONFIG["port"])
+        try:
+            cfg_port = int(cfg_port_value)
+        except Exception:
+            cfg_port = remote_client.DEFAULT_REMOTE_CONFIG["port"]
+        success, info = remote_client.test_remote_connection(cfg_host, cfg_port)
         remote_client.save_remote_config(remote_settings)
+
+        msg = "Remote target reachable" if success else f"Remote handshake failed: {info}"
+        msg_color = curses.color_pair(1) if success else curses.color_pair(2)
+        stdscr.erase()
+        stdscr.addstr(0, 0, "Remote connection test", curses.A_BOLD)
+        stdscr.addstr(2, 0, msg, msg_color)
+        stdscr.addstr(4, 0, "Press any key to continue.")
+        stdscr.refresh()
+        stdscr.getch()
 
     def training_config_menu(stdscr: "curses._CursesWindow") -> None:
         nonlocal training_active_name
         selected_field = 0
-        curses.init_pair(2, curses.COLOR_YELLOW, -1)
         while True:
             stdscr.erase()
             height, width = stdscr.getmaxyx()
@@ -959,6 +977,7 @@ def run_curses_interface() -> Optional[list[str]]:
         curses.start_color()
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_GREEN, -1)
+        curses.init_pair(2, curses.COLOR_YELLOW, -1)
 
         runs = DROPBEAR_RUNS
         selected = runs.index("dropbear_quick_test") if "dropbear_quick_test" in runs else 0

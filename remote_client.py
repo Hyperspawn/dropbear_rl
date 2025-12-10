@@ -5,7 +5,7 @@ import socket
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import remote_protocol
 
@@ -113,3 +113,16 @@ def dispatch_remote(cmd: Iterable[str], description: Optional[str] = None) -> su
     if return_code != 0:
         raise subprocess.CalledProcessError(return_code, list(cmd))
     return subprocess.CompletedProcess(args=list(cmd), returncode=return_code)
+
+
+def test_remote_connection(host: str, port: int, timeout: float = 2.0) -> Tuple[bool, str]:
+    if not host:
+        return False, "Host is empty"
+    if not port:
+        return False, "Port is not set"
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            pass
+    except Exception as exc:
+        return False, str(exc)
+    return True, "Connection succeeded"
