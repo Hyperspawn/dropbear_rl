@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import socket
 import socketserver
 import subprocess
 import sys
@@ -141,7 +142,15 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8721, help="Port to listen on.")
     args = parser.parse_args()
     server = RemoteServer((args.host, args.port), RemoteRequestHandler)
-    print(f"[remote] Listening on {args.host}:{args.port}")
+    advertised_host = args.host
+    if args.host in ("0.0.0.0", ""):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as test_sock:
+                test_sock.connect(("8.8.8.8", 80))
+                advertised_host = test_sock.getsockname()[0]
+        except Exception:
+            advertised_host = "0.0.0.0"
+    print(f"[remote] Listening on {args.host}:{args.port} (reachable via {advertised_host}:{args.port})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
