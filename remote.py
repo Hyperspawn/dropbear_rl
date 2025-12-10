@@ -1,6 +1,7 @@
 """Remote IsaacLab runner that listens for commands from the local controller."""
 
 import argparse
+import contextlib
 import curses
 import json
 import os
@@ -73,8 +74,24 @@ def _stream_command(
     _send_payload(writer, {"type": "exit", "code": return_code})
 
 
+def _pick_accessible_port(preferred: int, max_attempts: int = 40) -> int:
+    for offset in range(max_attempts):
+        candidate = preferred + offset
+        if candidate > 65535:
+            break
+        with contextlib.suppress(OSError):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tester:
+                tester.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                tester.bind(("0.0.0.0", candidate))
+                return candidate
+    raise RuntimeError(f"Could not bind any port starting at {preferred}.")
+
+
 def _run_direct_server(host: str, port: int) -> None:
-    server = RemoteServer((host, port), RemoteRequestHandler)
+    accessible_port = _pick_accessible_port(port)
+    if accessible_port != port:
+        print(f"[remote] Port {port} busy; using {accessible_port} instead.")
+    server = RemoteServer((host, accessible_port), RemoteRequestHandler)
     advertised_host = host
     if host in ("0.0.0.0", ""):
         try:
@@ -342,7 +359,6 @@ def run_reverse_agent(target_host: str, target_port: int) -> None:
                         continue
                     resolved_cmd = resolve_command(cmd)
                     _stream_command(resolved_cmd, msg.get("description"), env, writer)
-                return
         except Exception as exc:
             print(f"[remote] Reverse agent connection failed: {exc}, retrying in 2s...", flush=True)
             time.sleep(2)

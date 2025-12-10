@@ -17,7 +17,7 @@ DEFAULT_REMOTE_CONFIG = {
     "enabled": False,
     "mode": "reverse",
     "host": "127.0.0.1",
-    "port": 8721,
+    "port": 5010,
     "reverse_port": 8765,
 }
 
