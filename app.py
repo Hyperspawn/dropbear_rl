@@ -25,12 +25,14 @@ from __future__ import annotations
 import argparse
 import ctypes
 import curses
+import json
 import os
 import platform
 import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -55,6 +57,153 @@ DROPBEAR_RUNS: list[str] = [
     "dropbear_play",
     "none",
 ]
+POLICY_LOG_ROOT = PROJECT_ROOT / "IsaacLab" / "logs" / "rsl_rl"
+SAVE_AFTER_FILE = PROJECT_ROOT / "isaaclab_save_after.json"
+
+TRAINING_CONFIG_FILE = PROJECT_ROOT / "isaaclab_training_configs.json"
+DEFAULT_TRAINING_CONFIG_NAME = "dropbear_default"
+
+TRAINING_CONFIG_FIELDS = [
+    {
+        "path": "agent_cfg.policy.init_noise_std",
+        "label": "Init noise std",
+        "kind": "float",
+        "min": 0.01,
+        "max": 2.0,
+        "step": 0.05,
+        "display_format": "{:.2f}",
+        "override_format": "{:.4g}",
+        "default": 0.5,
+    },
+    {
+        "path": "agent_cfg.algorithm.entropy_coef",
+        "label": "Entropy coef",
+        "kind": "float",
+        "min": 0.0,
+        "max": 0.2,
+        "step": 0.01,
+        "display_format": "{:.3f}",
+        "override_format": "{:.4g}",
+        "default": 0.05,
+    },
+    {
+        "path": "agent_cfg.algorithm.clip_param",
+        "label": "Clip param",
+        "kind": "float",
+        "min": 0.01,
+        "max": 0.5,
+        "step": 0.01,
+        "display_format": "{:.3f}",
+        "override_format": "{:.4g}",
+        "default": 0.1,
+    },
+    {
+        "path": "agent_cfg.algorithm.learning_rate",
+        "label": "Learning rate",
+        "kind": "float",
+        "min": 1e-5,
+        "max": 1e-3,
+        "step": 1e-5,
+        "display_format": "{:.4g}",
+        "override_format": "{:.6g}",
+        "default": 1.0e-4,
+    },
+    {
+        "path": "agent_cfg.algorithm.max_grad_norm",
+        "label": "Max grad norm",
+        "kind": "float",
+        "min": 0.1,
+        "max": 2.0,
+        "step": 0.1,
+        "display_format": "{:.2f}",
+        "override_format": "{:.4g}",
+        "default": 0.5,
+    },
+    {
+        "path": "agent_cfg.algorithm.num_learning_epochs",
+        "label": "Learning epochs",
+        "kind": "int",
+        "min": 1,
+        "max": 10,
+        "step": 1,
+        "display_format": "{}",
+        "override_format": "{}",
+        "default": 2,
+    },
+]
+
+def _default_training_config_entry() -> dict:
+    return {field["path"]: field["default"] for field in TRAINING_CONFIG_FIELDS}
+
+
+def _coerce_training_value(field: dict, raw_value: object) -> object:
+    try:
+        if field["kind"] == "int":
+            return int(raw_value)
+        return float(raw_value)
+    except Exception:
+        return field["default"]
+
+
+def load_training_configs() -> dict:
+    data: dict = {"configs": {}, "last_used": DEFAULT_TRAINING_CONFIG_NAME}
+    if TRAINING_CONFIG_FILE.exists():
+        try:
+            raw = json.loads(TRAINING_CONFIG_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                configs = raw.get("configs")
+                if isinstance(configs, dict):
+                    data["configs"] = {name: dict(value) for name, value in configs.items() if isinstance(value, dict)}
+                last_used = raw.get("last_used")
+                if isinstance(last_used, str):
+                    data["last_used"] = last_used
+        except Exception as exc:
+            print(f"[!] Failed to read training config file: {exc}")
+
+    if DEFAULT_TRAINING_CONFIG_NAME not in data["configs"]:
+        data["configs"][DEFAULT_TRAINING_CONFIG_NAME] = _default_training_config_entry()
+
+    for name, entry in data["configs"].items():
+        for field in TRAINING_CONFIG_FIELDS:
+            entry.setdefault(field["path"], field["default"])
+            entry[field["path"]] = _coerce_training_value(field, entry[field["path"]])
+    if data["last_used"] not in data["configs"]:
+        data["last_used"] = DEFAULT_TRAINING_CONFIG_NAME
+    return data
+
+
+def save_training_configs(data: dict) -> None:
+    try:
+        ensure_dir(TRAINING_CONFIG_FILE.parent)
+        TRAINING_CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"[!] Failed to persist training configs: {exc}")
+
+
+def _format_training_value(field: dict, value: object) -> str:
+    fmt = field.get("display_format")
+    if fmt and isinstance(value, (float, int)):
+        return fmt.format(value)
+    if field["kind"] == "int":
+        return str(int(value))
+    return f"{float(value):.4g}"
+
+
+def _format_override_value(field: dict, value: object) -> str:
+    fmt = field.get("override_format")
+    if fmt and isinstance(value, (float, int)):
+        return fmt.format(value)
+    if field["kind"] == "int":
+        return str(int(value))
+    return f"{float(value):.6g}"
+
+
+def training_config_overrides(entry: dict) -> list[str]:
+    overrides: list[str] = []
+    for field in TRAINING_CONFIG_FIELDS:
+        value = entry.get(field["path"], field["default"])
+        overrides.append(f"+{field['path']}={_format_override_value(field, value)}")
+    return overrides
 
 # -----------------------------
 # helpers
@@ -335,8 +484,205 @@ def ensure_actor_critic_std(env_dir: Path) -> None:
     actor_critic_path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+def _gather_policy_checkpoints() -> list[Path]:
+    """Return list of available checkpoints under logs/rsl_rl."""
+    candidates: list[Path] = []
+    if not POLICY_LOG_ROOT.exists():
+        return candidates
+    for exp in sorted(POLICY_LOG_ROOT.iterdir()):
+        if not exp.is_dir():
+            continue
+        for run in sorted(exp.iterdir()):
+            if not run.is_dir():
+                continue
+            for ckpt in sorted(run.glob("model_*.pt")):
+                candidates.append(ckpt)
+    return candidates
+
+# Save-run helper
+def save_run_config(args: argparse.Namespace, unknown: list[str]) -> None:
+    try:
+        payload = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "run": args.run,
+            "dropbear_task": args.dropbear_task,
+            "checkpoint": getattr(args, "checkpoint", None),
+            "args": unknown,
+        }
+        SAVE_AFTER_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"[i] Saved run metadata to {SAVE_AFTER_FILE}")
+    except Exception as exc:
+        print(f"[!] Failed to save run metadata: {exc}")
+
 def run_curses_interface() -> Optional[list[str]]:
     """Launch an interactive menu over curses to configure arguments."""
+
+    training_configs = load_training_configs()
+    training_active_name = training_configs.get("last_used", DEFAULT_TRAINING_CONFIG_NAME)
+    if training_active_name not in training_configs["configs"]:
+        training_active_name = DEFAULT_TRAINING_CONFIG_NAME
+
+    def select_checkpoint(stdscr: "curses._CursesWindow", checkpoints: list[Path]) -> Optional[Path]:
+        if not checkpoints:
+            stdscr.erase()
+            msg = f"No checkpoints found under {POLICY_LOG_ROOT}"
+            stdscr.addstr(0, 0, msg, curses.A_BOLD)
+            stdscr.addstr(2, 0, "Press any key to return.")
+            stdscr.refresh()
+            stdscr.getch()
+            return None
+        selected = 0
+        offset = 0
+        while True:
+            stdscr.erase()
+            height, width = stdscr.getmaxyx()
+            stdscr.addstr(0, 0, f"Select checkpoint ({len(checkpoints)} entries):", curses.A_BOLD)
+            available = height - 4
+            if available <= 0:
+                available = 1
+            if selected < offset:
+                offset = selected
+            elif selected >= offset + available:
+                offset = selected - available + 1
+            for idx in range(offset, min(len(checkpoints), offset + available)):
+                rel = checkpoints[idx].relative_to(POLICY_LOG_ROOT)
+                prefix = ">" if idx == selected else " "
+                attr = curses.A_REVERSE if idx == selected else curses.A_NORMAL
+                stdscr.addstr(1 + idx - offset, 0, f"{prefix} {str(rel)}", attr)
+            instructions = "[Enter] Select  [q/Esc] Back  [↑/↓] Navigate"
+            stdscr.addstr(height - 2, 0, instructions, curses.color_pair(1))
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord("k")):
+                selected = (selected - 1) % len(checkpoints)
+            elif key in (curses.KEY_DOWN, ord("j")):
+                selected = (selected + 1) % len(checkpoints)
+            elif key in (10, 13):
+                return checkpoints[selected]
+            elif key in (ord("q"), 27):
+                return None
+
+    def prompt_for_config_name(stdscr: "curses._CursesWindow", prompt: str) -> Optional[str]:
+        curses.echo()
+        curses.curs_set(1)
+        stdscr.erase()
+        height, width = stdscr.getmaxyx()
+        stdscr.addstr(0, 0, prompt)
+        stdscr.addstr(2, 0, "Leave blank to cancel.")
+        stdscr.refresh()
+        try:
+            raw = stdscr.getstr(1, 0, 64)
+            name = raw.decode("utf-8", errors="ignore").strip()
+        finally:
+            curses.noecho()
+            curses.curs_set(0)
+        return name or None
+
+    def select_training_profile(stdscr: "curses._CursesWindow") -> Optional[str]:
+        names = sorted(training_configs["configs"])
+        if not names:
+            return None
+        selected_idx = names.index(training_active_name) if training_active_name in names else 0
+        offset = 0
+        while True:
+            stdscr.erase()
+            height, width = stdscr.getmaxyx()
+            stdscr.addstr(0, 0, "Select training config:", curses.A_BOLD)
+            available = height - 4
+            if available <= 0:
+                available = 1
+            if selected_idx < offset:
+                offset = selected_idx
+            elif selected_idx >= offset + available:
+                offset = selected_idx - available + 1
+            for idx in range(offset, min(len(names), offset + available)):
+                prefix = ">" if idx == selected_idx else " "
+                attr = curses.A_REVERSE if idx == selected_idx else curses.A_NORMAL
+                stdscr.addstr(1 + idx - offset, 0, f"{prefix} {names[idx]}", attr)
+            instructions = "[Enter] Select  [q/Esc] Back  [↑/↓] Navigate"
+            stdscr.addstr(height - 2, 0, instructions, curses.color_pair(1))
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord("k")):
+                selected_idx = (selected_idx - 1) % len(names)
+            elif key in (curses.KEY_DOWN, ord("j")):
+                selected_idx = (selected_idx + 1) % len(names)
+            elif key in (10, 13):
+                return names[selected_idx]
+            elif key in (ord("q"), 27):
+                return None
+
+    def training_config_menu(stdscr: "curses._CursesWindow") -> None:
+        nonlocal training_active_name
+        selected_field = 0
+        while True:
+            stdscr.erase()
+            height, width = stdscr.getmaxyx()
+            border = "+" + "-" * (width - 2) + "+"
+            stdscr.addstr(0, 0, border)
+            stdscr.addstr(height - 2, 0, "+" + "-" * (width - 2) + "+")
+            for line in range(1, height - 2):
+                stdscr.addstr(line, 0, "|")
+                stdscr.addstr(line, width - 1, "|")
+            title = f" Training Config: {training_active_name} "
+            stdscr.addstr(0, max(0, (width - len(title)) // 2), title, curses.color_pair(1) | curses.A_BOLD)
+            config = training_configs["configs"][training_active_name]
+            content_start = 2
+            fields = TRAINING_CONFIG_FIELDS
+            max_rows = max(1, height - 8)
+            start_idx = max(0, min(selected_field - max_rows + 1, len(fields) - max_rows))
+            for idx in range(start_idx, min(len(fields), start_idx + max_rows)):
+                field = fields[idx]
+                value = config[field["path"]]
+                prefix = ">" if idx == selected_field else " "
+                attr = curses.A_REVERSE if idx == selected_field else curses.A_NORMAL
+                label = f"{prefix} {field['label']}: {_format_training_value(field, value)}"
+                stdscr.addstr(content_start + idx - start_idx, 3, label[: max(0, width - 6)], attr)
+            instructions = "[+/-] Adjust  [l] Load  [n] New  [d] Delete  [r] Reset  [Enter/q] Back"
+            stdscr.addstr(height - 3, 2, instructions[: max(0, width - 4)], curses.color_pair(1))
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key in (curses.KEY_UP, ord("k")):
+                selected_field = (selected_field - 1) % len(fields)
+            elif key in (curses.KEY_DOWN, ord("j")):
+                selected_field = (selected_field + 1) % len(fields)
+            elif key in (ord("+"), ord("=")):
+                field = fields[selected_field]
+                path = field["path"]
+                current = float(config[path]) if field["kind"] == "float" else int(config[path])
+                step = field["step"]
+                new_value = current + step
+                new_value = min(field["max"], new_value)
+                if field["kind"] == "int":
+                    new_value = int(new_value)
+                config[path] = new_value
+            elif key in (ord("-"), ord("_")):
+                field = fields[selected_field]
+                path = field["path"]
+                current = float(config[path]) if field["kind"] == "float" else int(config[path])
+                step = field["step"]
+                new_value = current - step
+                new_value = max(field["min"], new_value)
+                if field["kind"] == "int":
+                    new_value = int(new_value)
+                config[path] = new_value
+            elif key == ord("l"):
+                chosen = select_training_profile(stdscr)
+                if chosen and chosen in training_configs["configs"]:
+                    training_active_name = chosen
+            elif key == ord("n"):
+                name = prompt_for_config_name(stdscr, "Enter name for new profile:")
+                if name:
+                    training_configs["configs"][name] = dict(config)
+                    training_active_name = name
+            elif key == ord("d"):
+                if training_active_name != DEFAULT_TRAINING_CONFIG_NAME and len(training_configs["configs"]) > 1:
+                    del training_configs["configs"][training_active_name]
+                    training_active_name = sorted(training_configs["configs"])[0]
+            elif key == ord("r"):
+                training_configs["configs"][training_active_name] = _default_training_config_entry()
+            elif key in (10, 13, ord("q"), 27):
+                break
 
     def wrap_menu(stdscr: "curses._CursesWindow") -> Optional[list[str]]:
         curses.curs_set(0)
@@ -353,6 +699,10 @@ def run_curses_interface() -> Optional[list[str]]:
         video_length = 200
         system_deps_choices = ["auto", "on", "off"]
         system_deps_idx = 0
+        policy_checkpoints = _gather_policy_checkpoints()
+        selected_checkpoint: Optional[Path] = None
+        save_after = False
+        num_envs = 4
 
         def build_args() -> list[str]:
             args = [f"--run={runs[selected]}"]
@@ -367,6 +717,14 @@ def run_curses_interface() -> Optional[list[str]]:
                 f"--dropbear-video-interval={video_interval}",
                 f"--dropbear-video-length={video_length}",
             ]
+            if selected_checkpoint is not None:
+                args.append(f"--checkpoint={selected_checkpoint}")
+            if save_after:
+                args.append("--save-after")
+            if runs[selected] == "dropbear_train":
+                args.append(f"--num_envs={num_envs}")
+                overrides = training_config_overrides(training_configs["configs"][training_active_name])
+                args += overrides
             return args
 
         while True:
@@ -375,9 +733,9 @@ def run_curses_interface() -> Optional[list[str]]:
             border = "+" + "-" * (width - 2) + "+"
             stdscr.addstr(0, 0, border)
             stdscr.addstr(height - 2, 0, "+" + "-" * (width - 2) + "+")
-            for line in range(1, height - 2):
-                stdscr.addstr(line, 0, "|")
-                stdscr.addstr(line, width - 1, "|")
+            for idx in range(1, height - 2):
+                stdscr.addstr(idx, 0, "|")
+                stdscr.addstr(idx, width - 1, "|")
 
             title = " Dropbear RL CLI "
             stdscr.addstr(0, max(0, (width - len(title)) // 2), title, curses.color_pair(1) | curses.A_BOLD)
@@ -389,17 +747,32 @@ def run_curses_interface() -> Optional[list[str]]:
                 stdscr.addstr(3 + idx, 5, f"{prefix} {run}", attr)
 
             info_row = 3 + len(runs) + 1
-            stdscr.addstr(info_row, 3, "Options:", curses.A_BOLD)
-            stdscr.addstr(info_row + 1, 5, f"[h] Headless: {'ON' if headless else 'OFF'}")
-            stdscr.addstr(info_row + 2, 5, f"[v] Video capture: {'ON' if video else 'OFF'}")
-            stdscr.addstr(info_row + 3, 5, f"[+/=]/[-/_] Iterations: {max_iterations}")
-            stdscr.addstr(info_row + 4, 5, f"[[]/[]] Video interval: {video_interval}")
-            stdscr.addstr(info_row + 5, 5, f"[,/.] Video length: {video_length}")
-            stdscr.addstr(info_row + 6, 5, f"[s] System deps: {system_deps_choices[system_deps_idx]}")
+            options = [
+                f"[h] Headless: {'ON' if headless else 'OFF'}",
+                f"[v] Video capture: {'ON' if video else 'OFF'}",
+                f"[+/=]/[-/_] Iterations: {max_iterations}",
+                f"[[]/[]] Video interval: {video_interval}",
+                f"[,/.] Video length: {video_length}",
+                f"[s] System deps: {system_deps_choices[system_deps_idx]}",
+                f"[p] Checkpoint: {selected_checkpoint.name if selected_checkpoint else 'none'}",
+                f"[n/m] Num envs: {num_envs}",
+                f"[a] Save after: {'ON' if save_after else 'OFF'}",
+                f"[t] Training config: {training_active_name}",
+            ]
+            for idx, text in enumerate(options):
+                row = info_row + idx
+                if row >= height - 3:
+                    break
+                stdscr.addstr(row, 5, text[: max(0, width - 8)])
 
             footer = "[Enter] Run   [q] Quit"
             stdscr.addstr(height - 1, max(2, (width - len(footer)) // 2), footer, curses.color_pair(1))
-            stdscr.addstr(height - 3, 2, "Use ↑/↓ to change run; press keys shown above to toggle values.", curses.A_DIM)
+            stdscr.addstr(
+                height - 3,
+                2,
+                "Use ↑/↓ to change run; toggle values with highlighted keys (n/m for envs, t for configs).",
+                curses.A_DIM,
+            )
 
             stdscr.refresh()
             key = stdscr.getch()
@@ -423,17 +796,36 @@ def run_curses_interface() -> Optional[list[str]]:
                 video_length = max(10, video_length - 10)
             elif key == ord("."):
                 video_length = min(2000, video_length + 10)
+            elif key == ord("n"):
+                num_envs = min(128, num_envs + 1)
+            elif key == ord("m"):
+                num_envs = max(1, num_envs - 1)
             elif key == ord("s"):
                 system_deps_idx = (system_deps_idx + 1) % len(system_deps_choices)
+            elif key == ord("a"):
+                save_after = not save_after
+            elif key == ord("p"):
+                ckpt = select_checkpoint(stdscr, policy_checkpoints)
+                if ckpt:
+                    selected_checkpoint = ckpt
+                    if "dropbear_play" in runs:
+                        selected = runs.index("dropbear_play")
+            elif key == ord("t"):
+                training_config_menu(stdscr)
             elif key in (10, 13):
                 return build_args()
             elif key in (ord("q"), 27):
                 return None
 
+    interactive_args: Optional[list[str]]
     try:
-        return curses.wrapper(wrap_menu)
+        interactive_args = curses.wrapper(wrap_menu)
     except curses.error:
-        return None
+        interactive_args = None
+    finally:
+        training_configs["last_used"] = training_active_name
+        save_training_configs(training_configs)
+    return interactive_args
 
 
 def add_dropbear_pythonpath(env: Dict[str, str]) -> Dict[str, str]:
@@ -516,6 +908,11 @@ def main() -> int:
         default=None,
         help="Video recording length (training + play).",
     )
+    ap.add_argument(
+        "--save-after",
+        action="store_true",
+        help="Save run metadata after the requested command completes.",
+    )
 
     args_list = interactive_args if interactive_args is not None else sys.argv[1:]
     args, unknown = ap.parse_known_args(args_list)
@@ -563,7 +960,7 @@ def main() -> int:
     if not args._inside_venv:
         create_venv_with_python(py311, env_dir)
         # Re-exec into that venv, preserving user args except internal flag
-        passthrough = [x for x in sys.argv[1:] if x != "--_inside-venv"]
+        passthrough = [x for x in args_list if x != "--_inside-venv"]
         ensure_in_venv(env_dir, passthrough)
 
     # From here on: running inside venv
@@ -744,6 +1141,9 @@ def main() -> int:
             play_args += unknown
             cmd = base_cmd + [script_path] + play_args
             run_cmd(cmd, cwd=repo_dir, env=run_env)
+
+    if args.save_after:
+        save_run_config(args, unknown)
 
     print("\n[i] Done.")
     print("[i] To use the venv later:")
