@@ -74,6 +74,11 @@ TRAINING_CONFIG_FIELDS = [
         "display_format": "{:.2f}",
         "override_format": "{:.4g}",
         "default": 0.5,
+        "description": "Exploration noise applied to the policy. Too little = no exploration; too much = jitter.",
+        "warn_low": 0.05,
+        "warn_low_msg": "Very low noise can freeze exploration.",
+        "warn_high": 1.6,
+        "warn_high_msg": "Very high noise often yields unstable actions.",
     },
     {
         "path": "agent_cfg.algorithm.entropy_coef",
@@ -85,6 +90,9 @@ TRAINING_CONFIG_FIELDS = [
         "display_format": "{:.3f}",
         "override_format": "{:.4g}",
         "default": 0.05,
+        "description": "Weight on entropy regularization to retain randomness during training.",
+        "warn_high": 0.15,
+        "warn_high_msg": "Large entropy weights can drown out the reward signal.",
     },
     {
         "path": "agent_cfg.algorithm.clip_param",
@@ -96,6 +104,9 @@ TRAINING_CONFIG_FIELDS = [
         "display_format": "{:.3f}",
         "override_format": "{:.4g}",
         "default": 0.1,
+        "description": "PPO clipping range for policy updates. Too large allows big jumps; too small is conservative.",
+        "warn_high": 0.3,
+        "warn_high_msg": "Very large clip parameters may destabilize updates.",
     },
     {
         "path": "agent_cfg.algorithm.learning_rate",
@@ -107,6 +118,9 @@ TRAINING_CONFIG_FIELDS = [
         "display_format": "{:.4g}",
         "override_format": "{:.6g}",
         "default": 1.0e-4,
+        "description": "Optimizer step size. High values may diverge; low values slow learning.",
+        "warn_high": 5e-4,
+        "warn_high_msg": "Very high LR may cause gradients to explode.",
     },
     {
         "path": "agent_cfg.algorithm.max_grad_norm",
@@ -118,6 +132,9 @@ TRAINING_CONFIG_FIELDS = [
         "display_format": "{:.2f}",
         "override_format": "{:.4g}",
         "default": 0.5,
+        "description": "Clips gradients to avoid exploding updates. Too tight = slow learning.",
+        "warn_low": 0.2,
+        "warn_low_msg": "Very low clipping may starve learning.",
     },
     {
         "path": "agent_cfg.algorithm.num_learning_epochs",
@@ -129,6 +146,149 @@ TRAINING_CONFIG_FIELDS = [
         "display_format": "{}",
         "override_format": "{}",
         "default": 2,
+        "description": "How many passes over each rollout for PPO updates.",
+        "warn_high": 6,
+        "warn_high_msg": "Too many epochs can overfit on stale data.",
+    },
+    {
+        "path": "agent_cfg.algorithm.value_loss_coef",
+        "label": "Value loss coef",
+        "kind": "float",
+        "min": 0.0,
+        "max": 2.0,
+        "step": 0.1,
+        "display_format": "{:.2f}",
+        "override_format": "{:.4g}",
+        "default": 1.0,
+        "description": "Weight for the critic loss relative to policy loss.",
+        "warn_high": 1.6,
+        "warn_high_msg": "Very high values overemphasize the critic.",
+    },
+    {
+        "path": "agent_cfg.algorithm.use_clipped_value_loss",
+        "label": "Clip value loss",
+        "kind": "bool",
+        "default": True,
+        "description": "Toggle clipping on the value loss to prevent runaway critic targets.",
+        "warn_bool_msg": "Disabling value clipping may destabilize the critic.",
+    },
+    {
+        "path": "agent_cfg.algorithm.schedule",
+        "label": "LR schedule",
+        "kind": "enum",
+        "values": ["fixed", "adaptive"],
+        "default": "fixed",
+        "description": "LR schedule used by RSL-RL. Adaptive follows KL/advantage feedback.",
+    },
+    {
+        "path": "agent_cfg.algorithm.gamma",
+        "label": "Discount (gamma)",
+        "kind": "float",
+        "min": 0.8,
+        "max": 0.999,
+        "step": 0.005,
+        "display_format": "{:.3f}",
+        "override_format": "{:.4g}",
+        "default": 0.99,
+        "description": "Discount factor for future rewards.",
+        "warn_low": 0.85,
+        "warn_low_msg": "Low gamma shortens the effective horizon.",
+    },
+    {
+        "path": "agent_cfg.algorithm.lam",
+        "label": "GAE λ",
+        "kind": "float",
+        "min": 0.8,
+        "max": 0.99,
+        "step": 0.01,
+        "display_format": "{:.3f}",
+        "override_format": "{:.4g}",
+        "default": 0.95,
+        "description": "GAE λ trades bias vs variance in advantage estimation.",
+        "warn_low": 0.85,
+        "warn_low_msg": "Low λ reduces temporal credit assignment.",
+    },
+    {
+        "path": "agent_cfg.algorithm.desired_kl",
+        "label": "Desired KL",
+        "kind": "float",
+        "min": 0.001,
+        "max": 0.02,
+        "step": 0.001,
+        "display_format": "{:.4f}",
+        "override_format": "{:.4g}",
+        "default": 0.005,
+        "description": "Target KL divergence per update. Smaller keeps steps conservative.",
+        "warn_low": 0.002,
+        "warn_low_msg": "Extremely low KL slows down policy improvement.",
+        "warn_high": 0.014,
+        "warn_high_msg": "High KL can allow overly aggressive updates.",
+    },
+    {
+        "path": "agent_cfg.clip_actions",
+        "label": "Clip actions",
+        "kind": "bool",
+        "default": True,
+        "description": "Clip policy outputs to action limits.",
+        "warn_bool_msg": "Turning off clipping may send invalid actions to the env.",
+    },
+    {
+        "path": "env_cfg.terminations.base_height.params.minimum_height",
+        "label": "Min base height",
+        "kind": "float",
+        "min": 0.3,
+        "max": 1.2,
+        "step": 0.02,
+        "display_format": "{:.2f}",
+        "override_format": "{:.4g}",
+        "default": 0.5,
+        "description": "Termination height for the robot classed as fallen. Raising it aborts earlier.",
+        "warn_low": 0.4,
+        "warn_low_msg": "A very low threshold lets the robot tumble longer.",
+    },
+    {
+        "path": "env_cfg.terminations.base_contact.params.threshold",
+        "label": "Contact threshold",
+        "kind": "float",
+        "min": 0.1,
+        "max": 5.0,
+        "step": 0.1,
+        "display_format": "{:.2f}",
+        "override_format": "{:.4g}",
+        "default": 1.0,
+        "description": "Number of illegal contacts tolerated before termination.",
+        "warn_low": 0.5,
+        "warn_low_msg": "Very strict contact thresholds can terminate normal pushes.",
+        "warn_high": 4.0,
+        "warn_high_msg": "Too loose thresholds may hide actual collisions.",
+    },
+    {
+        "path": "env_cfg.rewards.undesired_contacts.weight",
+        "label": "Undesired contact",
+        "kind": "float",
+        "min": -3.0,
+        "max": 0.0,
+        "step": 0.1,
+        "display_format": "{:.2f}",
+        "override_format": "{:.4g}",
+        "default": -1.0,
+        "description": "Penalty for undesired contacts (excluding skateboard bodies).",
+        "warn_high": -0.4,
+        "warn_high_msg": "Reducing this penalty makes collisions cheap.",
+    },
+    {
+        "path": "env_cfg.rewards.feet_slide.weight",
+        "label": "Feet slide",
+        "kind": "float",
+        "min": -1.0,
+        "max": 0.0,
+        "step": 0.05,
+        "display_format": "{:.2f}",
+        "override_format": "{:.4g}",
+        "default": -0.2,
+        "description": "Penalty for foot sliding relative to contact points.",
+        "warn_high": -0.05,
+        "warn_high_msg": "Weak penalties allow the feet to slip freely.",
     },
 ]
 
@@ -137,12 +297,23 @@ def _default_training_config_entry() -> dict:
 
 
 def _coerce_training_value(field: dict, raw_value: object) -> object:
+    kind = field.get("kind")
     try:
-        if field["kind"] == "int":
+        if kind == "int":
             return int(raw_value)
-        return float(raw_value)
+        if kind == "float":
+            return float(raw_value)
+        if kind == "bool":
+            if isinstance(raw_value, str):
+                return raw_value.strip().lower() not in ("false", "0", "no", "off")
+            return bool(raw_value)
+        if kind == "enum":
+            candidate = str(raw_value)
+            values = field.get("values") or []
+            return candidate if candidate in values else field["default"]
     except Exception:
-        return field["default"]
+        pass
+    return field["default"]
 
 
 def load_training_configs() -> dict:
@@ -181,6 +352,10 @@ def save_training_configs(data: dict) -> None:
 
 
 def _format_training_value(field: dict, value: object) -> str:
+    if field["kind"] == "bool":
+        return "ON" if bool(value) else "OFF"
+    if field["kind"] == "enum":
+        return str(value)
     fmt = field.get("display_format")
     if fmt and isinstance(value, (float, int)):
         return fmt.format(value)
@@ -190,12 +365,36 @@ def _format_training_value(field: dict, value: object) -> str:
 
 
 def _format_override_value(field: dict, value: object) -> str:
+    if field["kind"] == "bool":
+        return str(bool(value))
+    if field["kind"] == "enum":
+        return str(value)
     fmt = field.get("override_format")
     if fmt and isinstance(value, (float, int)):
         return fmt.format(value)
     if field["kind"] == "int":
         return str(int(value))
     return f"{float(value):.6g}"
+
+
+def _training_field_description(field: dict) -> str:
+    return field.get("description", "")
+
+
+def _training_field_warning(field: dict, value: object) -> Optional[str]:
+    kind = field["kind"]
+    if kind in ("float", "int"):
+        val = float(value)
+        low = field.get("warn_low")
+        high = field.get("warn_high")
+        if low is not None and val <= low:
+            return field.get("warn_low_msg", f"{field['label']} near {low}.")
+        if high is not None and val >= high:
+            return field.get("warn_high_msg", f"{field['label']} near {high}.")
+    if kind == "bool":
+        if not bool(value):
+            return field.get("warn_bool_msg")
+    return None
 
 
 def training_config_overrides(entry: dict) -> list[str]:
@@ -615,6 +814,7 @@ def run_curses_interface() -> Optional[list[str]]:
     def training_config_menu(stdscr: "curses._CursesWindow") -> None:
         nonlocal training_active_name
         selected_field = 0
+        curses.init_pair(2, curses.COLOR_YELLOW, -1)
         while True:
             stdscr.erase()
             height, width = stdscr.getmaxyx()
@@ -638,8 +838,31 @@ def run_curses_interface() -> Optional[list[str]]:
                 attr = curses.A_REVERSE if idx == selected_field else curses.A_NORMAL
                 label = f"{prefix} {field['label']}: {_format_training_value(field, value)}"
                 stdscr.addstr(content_start + idx - start_idx, 3, label[: max(0, width - 6)], attr)
-            instructions = "[+/-] Adjust  [l] Load  [n] New  [d] Delete  [r] Reset  [Enter/q] Back"
-            stdscr.addstr(height - 3, 2, instructions[: max(0, width - 4)], curses.color_pair(1))
+            current_field = fields[selected_field]
+            description = _training_field_description(current_field)
+            desc_row = height - 5
+            if desc_row > 1 and description:
+                stdscr.addstr(desc_row, 2, description[: max(0, width - 4)], curses.A_DIM)
+            warn_row = height - 4
+            warning = _training_field_warning(current_field, config[current_field["path"]])
+            if warn_row > 1:
+                if warning:
+                    warning_text = "/!\\ " + warning
+                    stdscr.addstr(
+                        warn_row,
+                        2,
+                        warning_text[: max(0, width - 4)],
+                        curses.color_pair(2),
+                    )
+                else:
+                    # clear the line so stale warnings disappear
+                    stdscr.addstr(warn_row, 2, " " * max(0, width - 4))
+            instructions = (
+                "[+/-] Adjust numeric/enum  [Space] Toggle bool  "
+                "[d] Default field  [D] Delete profile  [l] Load  [n] New  [r] Reset  [Enter/q] Back"
+            )
+            trimmed_instructions = instructions[: max(0, width - 4)]
+            stdscr.addstr(height - 3, 2, trimmed_instructions, curses.color_pair(1))
             stdscr.refresh()
             key = stdscr.getch()
             if key in (curses.KEY_UP, ord("k")):
@@ -649,23 +872,50 @@ def run_curses_interface() -> Optional[list[str]]:
             elif key in (ord("+"), ord("=")):
                 field = fields[selected_field]
                 path = field["path"]
-                current = float(config[path]) if field["kind"] == "float" else int(config[path])
-                step = field["step"]
-                new_value = current + step
-                new_value = min(field["max"], new_value)
-                if field["kind"] == "int":
-                    new_value = int(new_value)
-                config[path] = new_value
+                kind = field["kind"]
+                if kind == "float":
+                    current = float(config[path])
+                    step = field["step"]
+                    new_value = min(field["max"], current + step)
+                    config[path] = new_value
+                elif kind == "int":
+                    current = int(config[path])
+                    step = field["step"]
+                    new_value = min(field["max"], current + step)
+                    config[path] = int(new_value)
+                elif kind == "enum":
+                    values = field.get("values", [])
+                    if values:
+                        current = config[path]
+                        idx = values.index(current) if current in values else 0
+                        idx = min(len(values) - 1, idx + 1)
+                        config[path] = values[idx]
             elif key in (ord("-"), ord("_")):
                 field = fields[selected_field]
                 path = field["path"]
-                current = float(config[path]) if field["kind"] == "float" else int(config[path])
-                step = field["step"]
-                new_value = current - step
-                new_value = max(field["min"], new_value)
-                if field["kind"] == "int":
-                    new_value = int(new_value)
-                config[path] = new_value
+                kind = field["kind"]
+                if kind == "float":
+                    current = float(config[path])
+                    step = field["step"]
+                    new_value = max(field["min"], current - step)
+                    config[path] = new_value
+                elif kind == "int":
+                    current = int(config[path])
+                    step = field["step"]
+                    new_value = max(field["min"], current - step)
+                    config[path] = int(new_value)
+                elif kind == "enum":
+                    values = field.get("values", [])
+                    if values:
+                        current = config[path]
+                        idx = values.index(current) if current in values else 0
+                        idx = max(0, idx - 1)
+                        config[path] = values[idx]
+            elif key == ord(" "):
+                field = fields[selected_field]
+                path = field["path"]
+                if field["kind"] == "bool":
+                    config[path] = not bool(config[path])
             elif key == ord("l"):
                 chosen = select_training_profile(stdscr)
                 if chosen and chosen in training_configs["configs"]:
@@ -676,6 +926,10 @@ def run_curses_interface() -> Optional[list[str]]:
                     training_configs["configs"][name] = dict(config)
                     training_active_name = name
             elif key == ord("d"):
+                field = fields[selected_field]
+                path = field["path"]
+                config[path] = _coerce_training_value(field, field["default"])
+            elif key == ord("D"):
                 if training_active_name != DEFAULT_TRAINING_CONFIG_NAME and len(training_configs["configs"]) > 1:
                     del training_configs["configs"][training_active_name]
                     training_active_name = sorted(training_configs["configs"])[0]
