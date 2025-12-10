@@ -36,6 +36,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import remote_client
+
 
 DEFAULT_ISAACSIM_VERSION = "5.1.0"
 DEFAULT_TORCH_VERSION = "2.7.0"
@@ -720,6 +722,7 @@ def run_curses_interface() -> Optional[list[str]]:
     training_active_name = training_configs.get("last_used", DEFAULT_TRAINING_CONFIG_NAME)
     if training_active_name not in training_configs["configs"]:
         training_active_name = DEFAULT_TRAINING_CONFIG_NAME
+    remote_settings = remote_client.get_remote_config()
 
     def select_checkpoint(stdscr: "curses._CursesWindow", checkpoints: list[Path]) -> Optional[Path]:
         if not checkpoints:
@@ -732,6 +735,19 @@ def run_curses_interface() -> Optional[list[str]]:
             return None
         selected = 0
         offset = 0
+        def configure_remote_target(stdscr: "curses._CursesWindow") -> None:
+            value = prompt_for_config_name(stdscr, "Remote target (host:port):")
+            if not value:
+                return
+            parts = value.split(":")
+            remote_settings["host"] = parts[0].strip()
+            if len(parts) > 1:
+                try:
+                    remote_settings["port"] = int(parts[1])
+                except Exception:
+                    pass
+            remote_client.save_remote_config(remote_settings)
+
         while True:
             stdscr.erase()
             height, width = stdscr.getmaxyx()
@@ -1001,6 +1017,9 @@ def run_curses_interface() -> Optional[list[str]]:
                 stdscr.addstr(3 + idx, 5, f"{prefix} {run}", attr)
 
             info_row = 3 + len(runs) + 1
+            remote_enabled = bool(remote_settings.get("enabled"))
+            remote_host = remote_settings.get("host", "")
+            remote_port = remote_settings.get("port", "")
             options = [
                 f"[h] Headless: {'ON' if headless else 'OFF'}",
                 f"[v] Video capture: {'ON' if video else 'OFF'}",
@@ -1012,6 +1031,8 @@ def run_curses_interface() -> Optional[list[str]]:
                 f"[n/m] Num envs: {num_envs}",
                 f"[a] Save after: {'ON' if save_after else 'OFF'}",
                 f"[t] Training config: {training_active_name}",
+                f"[r] Remote compute: {'ON' if remote_enabled else 'OFF'}",
+                f"[R] Remote host: {remote_host}:{remote_port}",
             ]
             for idx, text in enumerate(options):
                 row = info_row + idx
@@ -1024,7 +1045,8 @@ def run_curses_interface() -> Optional[list[str]]:
             stdscr.addstr(
                 height - 3,
                 2,
-                "Use ↑/↓ to change run; toggle values with highlighted keys (n/m for envs, t for configs).",
+                "Use ↑/↓ to change run; toggle values with highlighted keys "
+                "(n/m for envs, t for configs, r/R for remote).",
                 curses.A_DIM,
             )
 
@@ -1064,6 +1086,11 @@ def run_curses_interface() -> Optional[list[str]]:
                     selected_checkpoint = ckpt
                     if "dropbear_play" in runs:
                         selected = runs.index("dropbear_play")
+            elif key == ord("r"):
+                remote_settings["enabled"] = not bool(remote_settings.get("enabled"))
+                remote_client.save_remote_config(remote_settings)
+            elif key == ord("R"):
+                configure_remote_target(stdscr)
             elif key == ord("t"):
                 training_config_menu(stdscr)
             elif key in (10, 13):
@@ -1391,7 +1418,10 @@ def main() -> int:
                 train_args.append("--headless")
             train_args += unknown
             cmd = base_cmd + [script_path] + train_args
-            run_cmd(cmd, cwd=repo_dir, env=run_env)
+            if remote_client.is_remote_enabled():
+                remote_client.dispatch_remote(cmd, description="dropbear_train")
+            else:
+                run_cmd(cmd, cwd=repo_dir, env=run_env)
 
         elif args.run == "dropbear_play":
             script_path = str(PROJECT_ROOT / "scripts" / "rsl_rl" / "play.py")
