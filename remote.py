@@ -272,6 +272,8 @@ def boot_remote_venv() -> None:
 
 def main() -> None:
     boot_remote_venv()
+    if os.geteuid() != 0:
+        raise SystemExit("Remote runner must be started as root (sudo) to enable bidirectional comms.")
     parser = argparse.ArgumentParser(description="Remote Dropbear RL server.")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host/interface to listen on.")
     parser.add_argument("--port", type=int, default=8721, help="Port to listen on.")
