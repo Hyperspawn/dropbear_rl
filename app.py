@@ -30,6 +30,7 @@ import os
 import platform
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -39,6 +40,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import remote_client
+import reverse_remote
 
 
 DEFAULT_ISAACSIM_VERSION = "5.1.0"
@@ -295,6 +297,35 @@ TRAINING_CONFIG_FIELDS = [
         "warn_high_msg": "Weak penalties allow the feet to slip freely.",
     },
 ]
+
+
+def _get_primary_ipv4() -> Optional[str]:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    return None
+
+
+def _get_local_ipv4_candidates() -> list[str]:
+    ips: set[str] = set()
+    try:
+        host = socket.gethostname()
+        for info in socket.getaddrinfo(host, None, family=socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127."):
+                ips.add(ip)
+    except Exception:
+        pass
+    primary = _get_primary_ipv4()
+    if primary:
+        ips.add(primary)
+    return sorted(ips)
 
 def _default_training_config_entry() -> dict:
     return {field["path"]: field["default"] for field in TRAINING_CONFIG_FIELDS}
@@ -725,6 +756,8 @@ def run_curses_interface() -> Optional[list[str]]:
     if training_active_name not in training_configs["configs"]:
         training_active_name = DEFAULT_TRAINING_CONFIG_NAME
     remote_settings = remote_client.get_remote_config()
+    remote_settings.setdefault("mode", "reverse")
+    remote_settings.setdefault("reverse_port", remote_client.get_reverse_port())
 
     def select_checkpoint(stdscr: "curses._CursesWindow", checkpoints: list[Path]) -> Optional[Path]:
         if not checkpoints:
@@ -1020,6 +1053,18 @@ def run_curses_interface() -> Optional[list[str]]:
         selected_checkpoint: Optional[Path] = None
         save_after = False
         num_envs = 4
+        listener_error: Optional[str] = None
+
+        def activate_reverse_listener() -> None:
+            nonlocal listener_error
+            listener_error = None
+            try:
+                remote_client.ensure_reverse_listener()
+            except Exception as exc:
+                listener_error = f"Reverse listener error: {exc}"
+
+        if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
+            activate_reverse_listener()
 
         def build_args() -> list[str]:
             args = [f"--run={runs[selected]}"]
@@ -1067,6 +1112,10 @@ def run_curses_interface() -> Optional[list[str]]:
             remote_enabled = bool(remote_settings.get("enabled"))
             remote_host = remote_settings.get("host", "")
             remote_port = remote_settings.get("port", "")
+            reverse_port = remote_settings.get("reverse_port", remote_client.get_reverse_port())
+            local_ips = _get_local_ipv4_candidates()
+            local_ip = local_ips[0] if local_ips else "127.0.0.1"
+            listener_status = "connected" if reverse_remote.is_agent_available() else "waiting"
             options = [
                 f"[h] Headless: {'ON' if headless else 'OFF'}",
                 f"[v] Video capture: {'ON' if video else 'OFF'}",
@@ -1080,6 +1129,7 @@ def run_curses_interface() -> Optional[list[str]]:
                 f"[t] Training config: {training_active_name}",
                 f"[r] Remote compute: {'ON' if remote_enabled else 'OFF'}",
                 f"[R] Remote host: {remote_host}:{remote_port}",
+                f"Reverse listener: {local_ip}:{reverse_port} ({listener_status})",
             ]
             for idx, text in enumerate(options):
                 row = info_row + idx
@@ -1089,6 +1139,12 @@ def run_curses_interface() -> Optional[list[str]]:
 
             footer = "[Enter] Run   [q] Quit"
             stdscr.addstr(height - 1, max(2, (width - len(footer)) // 2), footer, curses.color_pair(1))
+            error_row = height - 4
+            if error_row > 0:
+                if listener_error:
+                    stdscr.addstr(error_row, 2, listener_error[: max(0, width - 4)], curses.color_pair(2))
+                else:
+                    stdscr.addstr(error_row, 2, " " * max(0, width - 4))
             stdscr.addstr(
                 height - 3,
                 2,
@@ -1136,6 +1192,8 @@ def run_curses_interface() -> Optional[list[str]]:
             elif key == ord("r"):
                 remote_settings["enabled"] = not bool(remote_settings.get("enabled"))
                 remote_client.save_remote_config(remote_settings)
+                if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
+                    activate_reverse_listener()
             elif key == ord("R"):
                 configure_remote_target(stdscr)
             elif key == ord("t"):

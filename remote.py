@@ -7,8 +7,9 @@ import socket
 import socketserver
 import subprocess
 import sys
+import uuid
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import remote_protocol
 
@@ -37,6 +38,56 @@ REMOTE_VENV_DIR = PROJECT_ROOT / REMOTE_VENV_NAME
 REMOTE_MARKER = REMOTE_VENV_DIR / ".remote_bootstrap_ok"
 INSIDE_FLAG = "--_inside-remote"
 
+def _send_payload(writer, payload: Dict[str, object]) -> None:
+    writer.write(remote_protocol.encode_message(payload))
+    writer.flush()
+
+
+def _stream_command(
+    cmd: List[str],
+    description: Optional[str],
+    env: Dict[str, str],
+    writer,
+) -> None:
+    desc = description or "run started"
+    _send_payload(writer, {"type": "start", "description": desc})
+    try:
+        process = subprocess.Popen(
+            cmd,
+            cwd=PROJECT_ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception as exc:
+        _send_payload(writer, {"type": "error", "message": f"Failed to start command: {exc}"})
+        _send_payload(writer, {"type": "exit", "code": 1})
+        return
+    assert process.stdout is not None
+    for line in process.stdout:
+        _send_payload(writer, {"type": "log", "message": line.rstrip()})
+    return_code = process.wait()
+    _send_payload(writer, {"type": "exit", "code": return_code})
+
+
+def _prepare_env() -> Dict[str, str]:
+    return prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
+
+
+def resolve_command(cmd: Iterable[str]) -> List[str]:
+    resolved: List[str] = []
+    for part in cmd:
+        path = Path(part)
+        if path.is_absolute():
+            resolved.append(str(path))
+        else:
+            candidate = PROJECT_ROOT / part
+            if candidate.exists():
+                resolved.append(str(candidate))
+            else:
+                resolved.append(part)
+    return resolved
 
 class RemoteRequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
@@ -53,49 +104,13 @@ class RemoteRequestHandler(socketserver.StreamRequestHandler):
             return
         description = request.get("description", "remote run")
         self._send({"type": "ack", "message": "Remote server received request and is preparing IsaacLab."})
-        self._send({"type": "start", "description": description})
-        resolved_cmd = self._resolve_command(cmd)
-        try:
-            env = prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
-            process = subprocess.Popen(
-            resolved_cmd,
-            cwd=PROJECT_ROOT,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        except Exception as exc:
-            self._send({"type": "error", "message": f"Failed to start command: {exc}"})
-            self._send({"type": "exit", "code": 1})
-            return
-
-        assert process.stdout is not None
-        for line in process.stdout:
-            self._send_log(line.rstrip())
-        return_code = process.wait()
-        self._send({"type": "exit", "code": return_code})
-
-    def _resolve_command(self, cmd: Iterable[str]) -> List[str]:
-        resolved: List[str] = []
-        for part in cmd:
-            path = Path(part)
-            if path.is_absolute():
-                resolved.append(str(path))
-            else:
-                candidate = PROJECT_ROOT / part
-                if candidate.exists():
-                    resolved.append(str(candidate))
-                else:
-                    resolved.append(part)
-        return resolved
+        env = _prepare_env()
+        resolved_cmd = resolve_command(cmd)
+        _stream_command(resolved_cmd, description, env, self.wfile)
 
     def _send(self, payload: Dict[str, object]) -> None:
         self.wfile.write(remote_protocol.encode_message(payload))
         self.wfile.flush()
-
-    def _send_log(self, line: str) -> None:
-        self._send({"type": "log", "message": line})
 
 
 class RemoteServer(socketserver.ThreadingTCPServer):
@@ -141,7 +156,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Remote Dropbear RL server.")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host/interface to listen on.")
     parser.add_argument("--port", type=int, default=8721, help="Port to listen on.")
+    parser.add_argument("--target-host", type=str, default="", help="Local app host to connect to for reverse remote.")
+    parser.add_argument("--target-port", type=int, default=8765, help="Local app port for reverse remote.")
     args = parser.parse_args()
+    if args.target_host:
+        run_reverse_agent(args.target_host, args.target_port)
+        return
     server = RemoteServer((args.host, args.port), RemoteRequestHandler)
     advertised_host = args.host
     if args.host in ("0.0.0.0", ""):
@@ -160,5 +180,34 @@ def main() -> None:
         server.shutdown()
 
 
+def run_reverse_agent(target_host: str, target_port: int) -> None:
+    if not target_host or target_port <= 0:
+        raise RuntimeError("Reverse target host and port must be provided.")
+    env = _prepare_env()
+    try:
+        with socket.create_connection((target_host, target_port), timeout=5) as sock:
+            reader = sock.makefile("rb")
+            writer = sock.makefile("wb")
+            _send_payload(
+                writer,
+                {
+                    "type": "handshake",
+                    "session_id": str(uuid.uuid4()),
+                    "description": f"reverse agent {socket.gethostname()}",
+                },
+            )
+            _send_payload(writer, {"type": "ack", "message": "Remote agent ready and awaiting commands."})
+            for msg in remote_protocol.iter_messages(reader):
+                if msg.get("type") != "command":
+                    continue
+                cmd = msg.get("cmd")
+                if not isinstance(cmd, list):
+                    _send_payload(writer, {"type": "error", "message": "Invalid command payload."})
+                    continue
+                resolved_cmd = resolve_command(cmd)
+                _stream_command(resolved_cmd, msg.get("description"), env, writer)
+    except Exception as exc:
+        print(f"[remote] Reverse agent connection failed: {exc}", flush=True)
+        sys.exit(1)
 if __name__ == "__main__":
     main()

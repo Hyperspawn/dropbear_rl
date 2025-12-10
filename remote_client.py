@@ -8,10 +8,17 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import remote_protocol
+import reverse_remote
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 REMOTE_CONFIG_FILE = PROJECT_ROOT / "isaaclab_remote_connection.json"
-DEFAULT_REMOTE_CONFIG = {"enabled": False, "host": "127.0.0.1", "port": 8721}
+DEFAULT_REMOTE_CONFIG = {
+    "enabled": False,
+    "mode": "reverse",
+    "host": "127.0.0.1",
+    "port": 8721,
+    "reverse_port": 8765,
+}
 
 _remote_config_cache: Optional[Dict[str, object]] = None
 
@@ -45,6 +52,11 @@ def save_remote_config(config: Dict[str, object]) -> None:
             data["port"] = int(data["port"])
         except Exception:
             data["port"] = DEFAULT_REMOTE_CONFIG["port"]
+    if "reverse_port" in data:
+        try:
+            data["reverse_port"] = int(data["reverse_port"])
+        except Exception:
+            data["reverse_port"] = DEFAULT_REMOTE_CONFIG["reverse_port"]
     try:
         REMOTE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         REMOTE_CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -56,6 +68,20 @@ def save_remote_config(config: Dict[str, object]) -> None:
 def is_remote_enabled() -> bool:
     cfg = _load_remote_config()
     return bool(cfg.get("enabled") and cfg.get("host") and cfg.get("port"))
+
+
+def is_reverse_mode() -> bool:
+    cfg = _load_remote_config()
+    return cfg.get("mode", "") == "reverse"
+
+
+def get_reverse_port() -> int:
+    cfg = _load_remote_config()
+    port = cfg.get("reverse_port", DEFAULT_REMOTE_CONFIG["reverse_port"])
+    try:
+        return int(port)
+    except Exception:
+        return DEFAULT_REMOTE_CONFIG["reverse_port"]
 
 
 def _normalize_command(cmd: Iterable[str]) -> List[str]:
@@ -78,7 +104,15 @@ def _normalize_command(cmd: Iterable[str]) -> List[str]:
     return normalized
 
 
-def dispatch_remote(cmd: Iterable[str], description: Optional[str] = None) -> subprocess.CompletedProcess:
+def _remote_log(msg: str) -> None:
+    print(f"[remote] {msg.rstrip()}", flush=True)
+
+
+def _remote_ack(msg: str) -> None:
+    print(f"[remote] ack: {msg.rstrip()}", flush=True)
+
+
+def _dispatch_direct(cmd: Iterable[str], description: Optional[str]) -> subprocess.CompletedProcess:
     cfg = _load_remote_config()
     host = cfg.get("host")
     port = cfg.get("port")
@@ -100,11 +134,11 @@ def dispatch_remote(cmd: Iterable[str], description: Optional[str] = None) -> su
                 for msg in remote_protocol.iter_messages(stream):
                     typ = msg.get("type")
                     if typ == "log":
-                        print(f"[remote] {msg.get('message', '').rstrip()}", flush=True)
+                        _remote_log(msg.get("message", ""))
                     elif typ == "start":
-                        print(f"[remote] {msg.get('description', 'run started')}", flush=True)
+                        _remote_log(msg.get("description", "run started"))
                     elif typ == "ack":
-                        print(f"[remote] ack: {msg.get('message', '').rstrip()}", flush=True)
+                        _remote_ack(msg.get("message", "ack"))
                     elif typ == "exit":
                         return_code = int(msg.get("code", 0))
                         break
@@ -115,6 +149,33 @@ def dispatch_remote(cmd: Iterable[str], description: Optional[str] = None) -> su
     if return_code != 0:
         raise subprocess.CalledProcessError(return_code, list(cmd))
     return subprocess.CompletedProcess(args=list(cmd), returncode=return_code)
+
+
+def _ensure_reverse_bridge() -> None:
+    cfg = _load_remote_config()
+    port = get_reverse_port()
+    reverse_remote.ensure_bridge("0.0.0.0", port, _remote_log, _remote_ack)
+
+
+def _dispatch_reverse(cmd: Iterable[str], description: Optional[str]) -> subprocess.CompletedProcess:
+    normalized_cmd = _normalize_command(cmd)
+    try:
+        exit_code = reverse_remote.dispatch_command(normalized_cmd, description)
+    except Exception as exc:
+        raise RuntimeError(f"Remote dispatch failed: {exc}") from exc
+    if exit_code != 0:
+        raise subprocess.CalledProcessError(exit_code, normalized_cmd)
+    return subprocess.CompletedProcess(args=list(normalized_cmd), returncode=exit_code)
+
+
+def dispatch_remote(cmd: Iterable[str], description: Optional[str] = None) -> subprocess.CompletedProcess:
+    cfg = _load_remote_config()
+    mode = cfg.get("mode", "direct")
+    if mode == "reverse":
+        _ensure_reverse_bridge()
+        return _dispatch_reverse(cmd, description)
+    else:
+        return _dispatch_direct(cmd, description)
 
 
 def test_remote_connection(host: str, port: int, timeout: float = 2.0) -> Tuple[bool, str]:
@@ -128,3 +189,14 @@ def test_remote_connection(host: str, port: int, timeout: float = 2.0) -> Tuple[
     except Exception as exc:
         return False, str(exc)
     return True, "Connection succeeded"
+
+
+def ensure_reverse_listener() -> Tuple[str, int]:
+    _ensure_reverse_bridge()
+    return reverse_remote.bridge_address()
+
+
+def is_reverse_listener_active() -> bool:
+    if reverse_remote.is_agent_available():
+        return True
+    return False
