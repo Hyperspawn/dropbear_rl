@@ -842,11 +842,8 @@ def add_dropbear_pythonpath(env: Dict[str, str]) -> Dict[str, str]:
 # main flow
 # -----------------------------
 def main() -> int:
-    interactive_args: Optional[list[str]] = None
-    if len(sys.argv) == 1 and sys.stdout.isatty():
-        interactive_args = run_curses_interface()
-        if interactive_args is None:
-            return 0
+    interactive_session = os.environ.pop("DROPBEAR_INTERACTIVE_SESSION", "0") == "1"
+    interactive_mode = interactive_session or (len(sys.argv) == 1 and sys.stdout.isatty())
     ap = argparse.ArgumentParser(description="Self-contained Isaac Sim (pip) + Isaac Lab (source) venv bootstrapper.")
     ap.add_argument("--base", type=str, default=str(Path.cwd()), help="Workspace directory (default: current dir).")
     ap.add_argument("--env", type=str, default="env_isaaclab", help="Venv directory name (default: env_isaaclab).")
@@ -914,7 +911,20 @@ def main() -> int:
         help="Save run metadata after the requested command completes.",
     )
 
-    args_list = interactive_args if interactive_args is not None else sys.argv[1:]
+    internal_flags = {"--_inside-venv"}
+    external_args_present = any(arg not in internal_flags for arg in sys.argv[1:])
+    show_interface = interactive_mode and not external_args_present
+    interactive_args: Optional[list[str]] = None
+    if show_interface:
+        interactive_args = run_curses_interface()
+        if interactive_args is None:
+            return 0
+        args_list = interactive_args
+        if not interactive_session:
+            os.environ["DROPBEAR_INTERACTIVE_SESSION"] = "1"
+            interactive_session = True
+    else:
+        args_list = sys.argv[1:]
     args, unknown = ap.parse_known_args(args_list)
 
     base = Path(args.base).expanduser().resolve()
@@ -1152,6 +1162,10 @@ def main() -> int:
     else:
         print(f"    source {env_dir}/bin/activate")
     print(f"[i] IsaacLab checkout: {repo_dir}")
+    if interactive_session:
+        print("\n[i] Restarting interactive menu...")
+        os.environ["DROPBEAR_INTERACTIVE_SESSION"] = "1"
+        os.execv(str(sys.executable), [str(sys.executable), str(Path(__file__).resolve()), "--_inside-venv"])
     return 0
 
 
