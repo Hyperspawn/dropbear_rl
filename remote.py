@@ -10,7 +10,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import remote_protocol
 
@@ -102,7 +102,7 @@ def _parse_host_port(value: str, default_port: int) -> Tuple[str, int]:
     return host, port
 
 
-def _curses_prompt(stdscr: curses._CursesWindow, prompt: str, default: str) -> Optional[str]:
+def _curses_prompt(stdscr: Any, prompt: str, default: str) -> Optional[str]:
     curses.echo()
     curses.curs_set(1)
     stdscr.erase()
@@ -119,7 +119,7 @@ def _curses_prompt(stdscr: curses._CursesWindow, prompt: str, default: str) -> O
     return line.decode("utf-8", errors="ignore").strip()
 
 
-def run_curses_menu(stdscr: curses._CursesWindow, args) -> Tuple[Optional[str], dict]:
+def run_curses_menu(stdscr: Any, args) -> Tuple[Optional[str], dict]:
     curses.curs_set(0)
     curses.start_color()
     curses.use_default_colors()
