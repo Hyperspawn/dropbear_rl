@@ -39,6 +39,17 @@ Dropbear RL Lab is a reinforcement learning framework for Dropbear robot. Run us
 - **NVIDIA GPU** with CUDA support
 - **Python 3.10+**
 
+## 🧳 Quickstart
+```bash
+git clone https://github.com/hyperspawn/dropbear_rl.git
+```
+
+Then simply run
+```bash
+cd dropbear_rl && python3 app.py
+```
+
+
 ## 🛠️ Installation
 
 ### 1. Install Isaac Sim and Isaac Lab
@@ -48,8 +59,8 @@ Follow the official [Isaac Lab installation guide](https://isaac-sim.github.io/I
 ### 2. Clone and Install Dropbear RL Lab
 
 ```bash
-git clone https://github.com/hyperspawn/dropbear_rl_lab.git
-cd dropbear_rl_lab
+git clone https://github.com/hyperspawn/dropbear_rl.git
+cd dropbear_rl
 
 # Install dependencies for video recording
 C:\isaac-sim\python.bat -m pip install moviepy

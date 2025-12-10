@@ -153,3 +153,6 @@ Thumbs.db
 # Hydra
 .hydra/
 multirun/
+
+env_isaaclab
+IsaacLab

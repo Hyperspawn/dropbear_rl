@@ -8,6 +8,8 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import os
+import pickle
 import sys
 
 from isaaclab.app import AppLauncher
@@ -77,6 +79,16 @@ from datetime import datetime
 
 from rsl_rl.runners import OnPolicyRunner
 
+
+def dump_pickle_file(filename: str, data: object) -> None:
+    """Persist configuration data using pickle (replicates the legacy helper)."""
+    directory = os.path.dirname(filename)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+    with open(filename, "wb") as handle:
+        pickle.dump(data, handle)
+
+
 import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -86,7 +98,7 @@ from isaaclab.envs import (
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import dump_pickle, dump_yaml
+from isaaclab.utils.io import dump_yaml
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -173,8 +185,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
+    dump_pickle_file(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
+    dump_pickle_file(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
     
     # copy the environment configuration file to the log directory
     shutil.copy(
