@@ -23,6 +23,13 @@ from remote_protocol_rl import (
 )
 
 
+def _canonical_identifier(address: Optional[str]) -> Optional[str]:
+    """Return the canonical identifier part of an NKN address."""
+    if not address:
+        return None
+    return address.split(".")[0]
+
+
 class ControllerRemoteEnvWrapper:
     """Wraps IsaacLab env to send obs to remote worker and receive actions.
 
@@ -53,6 +60,8 @@ class ControllerRemoteEnvWrapper:
         self.sequencer = MessageSequencer()
         self.action_queue: queue.Queue[MessageEnvelope] = queue.Queue(maxsize=100)
         self.step_counter = 0
+        self._own_identifier = _canonical_identifier(self.nkn_bridge.address)
+        self._worker_identifier = _canonical_identifier(self.worker_address)
 
         # Register message handler
         self._original_on_message = getattr(nkn_bridge, "on_message", None)
@@ -70,6 +79,20 @@ class ControllerRemoteEnvWrapper:
         """Handle incoming network messages."""
         print(f"[controller_env] DEBUG: Received message from {src}", flush=True)
         print(f"[controller_env] DEBUG: Expected worker: {self.worker_address}", flush=True)
+        canonical_src = _canonical_identifier(src)
+        if canonical_src and canonical_src == self._own_identifier:
+            print("[controller_env] DEBUG: Ignoring loopback message from controller itself", flush=True)
+            return
+        if (
+            canonical_src
+            and self._worker_identifier
+            and canonical_src != self._worker_identifier
+        ):
+            if self._original_on_message:
+                self._original_on_message(src, body)
+            else:
+                print(f"[controller_env] DEBUG: Ignoring message from unexpected source: {src}", flush=True)
+            return
 
         try:
             if not isinstance(body, dict) or "msg_type" not in body:

@@ -319,7 +319,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     controller_on_message(src, body)
                 return
 
-            msg_type = body.get("msg_type")
+            if "msg_type" not in body:
+                if controller_on_message:
+                    controller_on_message(src, body)
+                return
+
+            msg_type = body["msg_type"]
             if msg_type not in CHECKPOINT_MSG_TYPES:
                 if controller_on_message:
                     controller_on_message(src, body)

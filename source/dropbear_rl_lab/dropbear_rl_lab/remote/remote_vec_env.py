@@ -32,6 +32,13 @@ from remote_protocol_rl import (
 )
 
 
+def _canonical_identifier(address: Optional[str]) -> Optional[str]:
+    """Return the canonical identifier segment for an NKN address."""
+    if not address:
+        return None
+    return address.split(".")[0]
+
+
 class RemoteVecEnv:
     """Vectorized environment that receives obs from controller via network.
 
@@ -110,6 +117,8 @@ class RemoteVecEnv:
 
         # Network communication
         self.nkn_bridge = nkn_bridge
+        self._own_identifier = _canonical_identifier(self.nkn_bridge.address)
+        self._controller_identifier = _canonical_identifier(controller_address)
         self.sequencer = MessageSequencer()
         self.obs_queue: queue.Queue[MessageEnvelope] = queue.Queue(maxsize=100)
         self.step_counter = 0
@@ -136,6 +145,20 @@ class RemoteVecEnv:
         print(f"[remote_env] DEBUG: Received message from {src}", flush=True)
         print(f"[remote_env] DEBUG: Expected controller: {self.controller_address}", flush=True)
         print(f"[remote_env] DEBUG: My NKN address: {self.nkn_bridge.address}", flush=True)
+        canonical_src = _canonical_identifier(src)
+        if canonical_src and canonical_src == self._own_identifier:
+            print("[remote_env] DEBUG: Ignoring loopback message from remote itself", flush=True)
+            return
+        if (
+            canonical_src
+            and self._controller_identifier
+            and canonical_src != self._controller_identifier
+        ):
+            if self._original_on_message:
+                self._original_on_message(src, body)
+            else:
+                print(f"[remote_env] DEBUG: Ignoring message from unexpected source: {src}", flush=True)
+            return
 
         try:
             if not isinstance(body, dict) or "msg_type" not in body:
