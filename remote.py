@@ -519,6 +519,14 @@ class NKNRemoteAgent:
             self._log(f"[remote] Controller handshake ack: {status} ({addr})")
             self.display.set_status(status)
             return
+        if typ == "train_address_announcement":
+            train_addr = str(body.get("train_address", "") or "").strip()
+            if train_addr:
+                self._log(f"[remote] Received train_address announcement: {train_addr}")
+                _update_connection_config(train_address=train_addr)
+            else:
+                self._log("[remote] Received train_address announcement without address")
+            return
         if typ != "command":
             return
         threading.Thread(target=self._execute_command, args=(src, body), daemon=True).start()

@@ -78,78 +78,22 @@ def _dump_run_configs(log_dir: Path, env_cfg: RemoteEnvCfg, agent_cfg: RemoteAge
     dump_pickle_file(params_dir / "agent.pkl", agent_cfg.to_dict())
 
 
-def _wait_for_train_address_via_nkn(bridge: NKNSidecar, timeout: float = 30.0) -> Optional[str]:
-    """Wait for train.py to send its NKN address via direct message.
-
-    train.py will send a message with type="train_address_announcement"
-    containing its NKN address where we should send actions.
-
-    Args:
-        bridge: Our NKN bridge to receive messages
-        timeout: How long to wait for the announcement
-
-    Returns:
-        train.py's NKN address or None if timeout
-    """
-    import time
-
-    print("[train_remote] Waiting for train.py to announce its NKN address...", flush=True)
-    print("[train_remote] (This can take 15-20s while Isaac Sim starts up...)", flush=True)
-    print(f"[train_remote] DEBUG: My NKN address: {bridge.address}", flush=True)
-    print(f"[train_remote] DEBUG: Bridge state: {bridge.state}", flush=True)
-
-    received_address = [None]  # Use list to allow modification in nested function
-    message_count = [0]  # Track how many messages we receive
-
-    def _message_handler(src: str, body: dict):
-        """Handle incoming NKN messages looking for train_address_announcement"""
-        message_count[0] += 1
-        print(f"[train_remote] DEBUG: Received message #{message_count[0]} from {src}", flush=True)
-        print(f"[train_remote] DEBUG: Message body: {body}", flush=True)
-
-        msg_type = body.get("type", "")
-        print(f"[train_remote] DEBUG: Message type: {msg_type}", flush=True)
-
-        if msg_type == "train_address_announcement":
-            train_addr = body.get("train_address", "")
-            if train_addr:
-                print(f"[train_remote] ✓ Received train_address from {src}: {train_addr}", flush=True)
-                received_address[0] = train_addr
-            else:
-                print(f"[train_remote] ⚠ Received announcement but no train_address in message", flush=True)
-        else:
-            print(f"[train_remote] DEBUG: Ignoring message with type '{msg_type}'", flush=True)
-
-    # Register temporary message handler
-    original_handler = getattr(bridge, "on_message", None)
-    print(f"[train_remote] DEBUG: Original handler: {original_handler}", flush=True)
-    bridge.on_message = _message_handler
-    print(f"[train_remote] DEBUG: New handler registered: {bridge.on_message}", flush=True)
-
+def _wait_for_train_address_from_config(timeout: float = 40.0, poll: float = 0.5) -> Optional[str]:
+    """Poll the shared config file until train_address is populated."""
     start_time = time.time()
-    last_progress_time = 0
-    try:
-        while time.time() - start_time < timeout:
-            if received_address[0]:
-                print(f"[train_remote] ✓ Got train_address after {time.time() - start_time:.1f}s", flush=True)
-                return received_address[0]
-
-            elapsed = time.time() - start_time
-            # Print progress every 5 seconds (using integer comparison to avoid multiple prints)
-            if int(elapsed / 5) > int(last_progress_time / 5):
-                remaining = int(timeout - elapsed)
-                print(f"[train_remote] Still waiting... ({int(elapsed)}s elapsed, {remaining}s remaining, {message_count[0]} msgs received)", flush=True)
-                last_progress_time = elapsed
-
-            time.sleep(0.5)
-
-        print(f"[train_remote] ⚠ Timeout waiting for train_address announcement ({timeout}s, {message_count[0]} total messages)", flush=True)
-        return None
-    finally:
-        # Restore original handler
-        if original_handler:
-            bridge.on_message = original_handler
-            print(f"[train_remote] DEBUG: Restored original handler", flush=True)
+    while time.time() - start_time < timeout:
+        cfg = _load_connection_config()
+        nkn_cfg = cfg.get("nkn", {})
+        train_address = str(nkn_cfg.get("train_address") or "").strip()
+        if train_address:
+            print(f"[train_remote] ✓ Config contains train_address: {train_address}", flush=True)
+            return train_address
+        elapsed = time.time() - start_time
+        remaining = max(0.0, timeout - elapsed)
+        print(f"[train_remote] Still waiting for train_address in config ({int(elapsed)}s elapsed, {int(remaining)}s remaining)", flush=True)
+        time.sleep(poll)
+    print(f"[train_remote] ⚠ Timeout waiting for train_address in config ({timeout}s)", flush=True)
+    return None
 
 
 # Create debug log file
@@ -228,14 +172,11 @@ def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
         bridge = _start_nkn_bridge(app_address)
         print(f"[train_remote] ✓ Our NKN bridge started: {bridge.address}")
 
-        # Wait for train.py to announce its train_address via NKN
-        print("[train_remote] Waiting for train.py to announce train_address...")
-        controller_address = _wait_for_train_address_via_nkn(bridge, timeout=40.0)
-
+        controller_address = _wait_for_train_address_from_config(timeout=40.0)
         if controller_address:
-            print(f"[train_remote] ✓ Received train_address: {controller_address}")
+            print(f"[train_remote] ✓ Received train_address from config: {controller_address}")
         else:
-            print("[train_remote] ⚠ Timeout waiting for train_address!")
+            print("[train_remote] ⚠ Timeout waiting for train_address in config!")
             print("[train_remote] ⚠ Falling back to app_address (may cause conflicts)")
             controller_address = app_address
 
