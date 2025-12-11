@@ -15,13 +15,16 @@ from typing import Any, Dict, Optional
 import torch
 
 from remote_protocol_rl import (
+    MSG_ACTION_ACK,
     MSG_ACTION_BATCH,
+    MSG_ACTION_REQUEST,
     MSG_OBS_BATCH,
+    MSG_HEARTBEAT,
     MessageEnvelope,
     MessageSequencer,
-    MSG_HEARTBEAT,
-    create_obs_batch_message,
+    create_action_request_message,
     create_heartbeat_message,
+    create_obs_batch_message,
 )
 
 
@@ -88,6 +91,10 @@ class ControllerRemoteEnvWrapper:
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
 
+            if processed and processed.msg_type == MSG_ACTION_ACK:
+                print(f"[controller_env] Worker acknowledged action request for step {processed.payload.get('step_id')}")
+                return
+
             if processed and processed.msg_type == MSG_HEARTBEAT:
                 return
 
@@ -128,6 +135,12 @@ class ControllerRemoteEnvWrapper:
         # If no actions provided, wait for them from worker
         if actions is None:
             print(f"[controller_env] Waiting for actions from worker for step {self.step_counter}...")
+            try:
+                req = create_action_request_message(self.sequencer, step_id=self.step_counter)
+                self.nkn_bridge.send_dm(self.worker_address, req.to_dict())
+                print(f"[controller_env] Sent action_request for step {self.step_counter}")
+            except Exception as exc:
+                print(f"[controller_env] Failed to send action_request: {exc}")
             try:
                 action_msg = self.action_queue.get(timeout=self.timeout)
             except queue.Empty:

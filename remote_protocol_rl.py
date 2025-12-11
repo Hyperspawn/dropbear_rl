@@ -25,6 +25,8 @@ import torch
 MSG_TRAIN_START = "train_start"
 MSG_OBS_BATCH = "obs_batch"
 MSG_ACTION_BATCH = "action_batch"
+MSG_ACTION_REQUEST = "action_request"
+MSG_ACTION_ACK = "action_ack"
 MSG_REWARD_BATCH = "reward_batch"
 MSG_CHECKPOINT = "checkpoint"
 MSG_METRICS = "metrics"
@@ -297,6 +299,24 @@ def create_action_batch_message(
         "actions": TensorSerializer.serialize_tensor(actions),
     }
     return sequencer.create_message(MSG_ACTION_BATCH, payload)
+
+
+def create_action_request_message(
+    sequencer: MessageSequencer,
+    step_id: int,
+) -> MessageEnvelope:
+    """Create a lightweight action request message to prompt worker."""
+    payload = {"step_id": step_id}
+    return sequencer.create_message(MSG_ACTION_REQUEST, payload)
+
+
+def create_action_ack_message(
+    sequencer: MessageSequencer,
+    step_id: int,
+) -> MessageEnvelope:
+    """Create acknowledgment that worker is preparing actions."""
+    payload = {"step_id": step_id}
+    return sequencer.create_message(MSG_ACTION_ACK, payload)
 
 
 def create_checkpoint_message(

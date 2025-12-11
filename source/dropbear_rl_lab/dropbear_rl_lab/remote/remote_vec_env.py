@@ -23,12 +23,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from remote_protocol_rl import (
+    MSG_ACTION_ACK,
     MSG_ACTION_BATCH,
+    MSG_ACTION_REQUEST,
     MSG_OBS_BATCH,
     MSG_HEARTBEAT,
     MessageEnvelope,
     MessageSequencer,
     TensorSerializer,
+    create_action_ack_message,
     create_action_batch_message,
     create_heartbeat_message,
 )
@@ -166,6 +169,15 @@ class RemoteVecEnv:
                     pass
 
             if processed and processed.msg_type == MSG_HEARTBEAT:
+                return
+
+            if processed and processed.msg_type == MSG_ACTION_REQUEST:
+                try:
+                    ack = create_action_ack_message(self.sequencer, processed.payload.get("step_id", 0))
+                    self.nkn_bridge.send_dm(self.controller_address or src, ack.to_dict())
+                    print(f"[remote_env] Acked action request for step {processed.payload.get('step_id')}")
+                except Exception as exc:
+                    print(f"[remote_env] Failed to send action ack: {exc}")
                 return
 
         except Exception as e:
