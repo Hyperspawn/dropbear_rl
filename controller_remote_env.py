@@ -68,8 +68,12 @@ class ControllerRemoteEnvWrapper:
 
     def _handle_network_message(self, src: str, body: Dict[str, Any]) -> None:
         """Handle incoming network messages."""
+        print(f"[controller_env] DEBUG: Received message from {src}", flush=True)
+        print(f"[controller_env] DEBUG: Expected worker: {self.worker_address}", flush=True)
+
         # Only process action messages from our worker
         if src != self.worker_address:
+            print(f"[controller_env] DEBUG: Ignoring message from non-worker {src}", flush=True)
             if self._original_on_message:
                 self._original_on_message(src, body)
             return
@@ -77,14 +81,15 @@ class ControllerRemoteEnvWrapper:
         try:
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
+            print(f"[controller_env] DEBUG: Processed message type: {processed.msg_type if processed else 'None'}", flush=True)
 
             if processed and processed.msg_type == MSG_ACTION_BATCH:
                 # Queue action message
                 self.action_queue.put(processed, block=False)
-                print(f"[controller_env] Received actions for step {processed.payload['step_id']}")
+                print(f"[controller_env] ✓ Received actions for step {processed.payload['step_id']}", flush=True)
 
         except Exception as e:
-            print(f"[controller_env] Error processing message: {e}")
+            print(f"[controller_env] ✗ Error processing message: {e}", flush=True)
 
     def reset(self):
         """Reset environment and send initial observations to worker."""
@@ -164,11 +169,14 @@ class ControllerRemoteEnvWrapper:
 
         # Send via NKN
         try:
+            print(f"[controller_env] DEBUG: Sending obs to worker at {self.worker_address}", flush=True)
+            print(f"[controller_env] DEBUG: My NKN address: {self.nkn_bridge.address}", flush=True)
+            print(f"[controller_env] DEBUG: Step {self.step_counter}, msg type: {msg.msg_type}", flush=True)
             self.nkn_bridge.send_dm(self.worker_address, msg.to_dict())
-            print(f"[controller_env] Sent observations for step {self.step_counter}")
+            print(f"[controller_env] ✓ Sent observations for step {self.step_counter} to {self.worker_address}", flush=True)
             self.step_counter += 1
         except Exception as e:
-            print(f"[controller_env] Error sending observations: {e}")
+            print(f"[controller_env] ✗ Error sending observations: {e}", flush=True)
             raise
 
     def close(self):

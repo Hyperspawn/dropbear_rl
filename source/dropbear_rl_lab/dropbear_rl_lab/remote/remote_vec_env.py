@@ -133,8 +133,13 @@ class RemoteVecEnv:
 
     def _handle_network_message(self, src: str, body: Dict[str, Any]) -> None:
         """Handle incoming network messages."""
+        print(f"[remote_env] DEBUG: Received message from {src}", flush=True)
+        print(f"[remote_env] DEBUG: Expected controller: {self.controller_address}", flush=True)
+        print(f"[remote_env] DEBUG: My NKN address: {self.nkn_bridge.address}", flush=True)
+
         # Only process messages from controller
         if src != self.controller_address:
+            print(f"[remote_env] DEBUG: Ignoring message from non-controller {src}", flush=True)
             # Pass to original handler
             if self._original_on_message:
                 self._original_on_message(src, body)
@@ -143,13 +148,15 @@ class RemoteVecEnv:
         try:
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
+            print(f"[remote_env] DEBUG: Processed message type: {processed.msg_type if processed else 'None'}", flush=True)
 
             if processed and processed.msg_type == MSG_OBS_BATCH:
                 # Queue observation message
                 self.obs_queue.put(processed, block=False)
+                print(f"[remote_env] ✓ Received obs for step {processed.payload.get('step_id', '?')}", flush=True)
 
         except Exception as e:
-            print(f"[remote_env] Error processing message: {e}")
+            print(f"[remote_env] ✗ Error processing message: {e}", flush=True)
 
     def reset(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         """Reset environment by waiting for initial observations from controller.
@@ -210,12 +217,15 @@ class RemoteVecEnv:
         )
 
         try:
+            print(f"[remote_env] DEBUG: Sending actions for step {self.step_counter} to {self.controller_address}", flush=True)
+            print(f"[remote_env] DEBUG: My NKN address: {self.nkn_bridge.address}", flush=True)
             self.nkn_bridge.send_dm(
                 self.controller_address,
                 action_msg.to_dict()
             )
+            print(f"[remote_env] ✓ Sent actions for step {self.step_counter}", flush=True)
         except Exception as e:
-            print(f"[remote_env] Error sending actions: {e}")
+            print(f"[remote_env] ✗ Error sending actions: {e}", flush=True)
             raise
 
         # Wait for next observation batch
