@@ -398,6 +398,7 @@ class NKNRemoteAgent:
         self.env = _prepare_env()
         # Propagate NKN info to child commands so they can reuse connectivity
         self.env["DROPBEAR_REMOTE_NKN_SEED"] = seed_hex
+        self.env["DROPBEAR_REMOTE_NKN_IDENTIFIER"] = identifier
         if controller_address:
             self.env["DROPBEAR_CONTROLLER_NKN_ADDRESS"] = controller_address
         self.controller_address = controller_address.strip()

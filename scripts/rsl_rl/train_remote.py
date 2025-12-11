@@ -116,7 +116,11 @@ def main():
         (args_cli.nkn_seed or "").strip()
         or os.environ.get("DROPBEAR_REMOTE_NKN_SEED", "").strip()
     )
-    nkn_identifier = args_cli.nkn_identifier or "dropbear_remote_worker"
+    nkn_identifier = (
+        args_cli.nkn_identifier
+        or os.environ.get("DROPBEAR_REMOTE_NKN_IDENTIFIER", "").strip()
+        or "dropbear_remote_worker"
+    )
     nkn_seed_ws = ""
     nkn_num_subclients = 2
 
@@ -175,7 +179,7 @@ def main():
             nkn_bridge=nkn_bridge,
             controller_address=controller_address,
             device=task_config.get("device", "cuda:0"),
-            timeout=30.0,
+            timeout=120.0,
         )
         print(f"[train_remote] RemoteVecEnv initialized - waiting for obs from {controller_address}")
     else:
