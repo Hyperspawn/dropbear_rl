@@ -190,6 +190,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     # Check if remote mode is enabled for offloading policy to A100 workers
+    print(f"[train.py] ========================================", flush=True)
+    print(f"[train.py] CHECKING REMOTE MODE", flush=True)
+    print(f"[train.py] args_cli.remote_worker_address = '{args_cli.remote_worker_address}'", flush=True)
+    print(f"[train.py] Type: {type(args_cli.remote_worker_address)}", flush=True)
+    print(f"[train.py] Evaluates to: {bool(args_cli.remote_worker_address)}", flush=True)
+    print(f"[train.py] Will enter remote mode: {bool(args_cli.remote_worker_address)}", flush=True)
+    print(f"[train.py] ========================================", flush=True)
+
     if args_cli.remote_worker_address:
         print("[train.py] ========================================")
         print("[train.py] REMOTE MODE ACTIVE")
@@ -198,25 +206,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print("[train.py] ========================================")
 
         worker_address = args_cli.remote_worker_address
-        print(f"[train.py] NKN worker address: {worker_address}")
-        print(f"[train.py] Wrapping environment for remote policy execution...")
+        print(f"[train.py] NKN worker address: {worker_address}", flush=True)
+        print(f"[train.py] Wrapping environment for remote policy execution...", flush=True)
 
-        # Import and wrap with ControllerRemoteEnvWrapper
-        # NOTE: We need to create NKN bridge here in Isaac Sim environment
-        import sys
-        from pathlib import Path
-        PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-        sys.path.insert(0, str(PROJECT_ROOT))
+        try:
+            # Import and wrap with ControllerRemoteEnvWrapper
+            # NOTE: We need to create NKN bridge here in Isaac Sim environment
+            import sys
+            from pathlib import Path
+            PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+            sys.path.insert(0, str(PROJECT_ROOT))
 
-        from nkn_sidecar import NKNSidecar
-        import json
+            from nkn_sidecar import NKNSidecar
+            import json
 
-        # Load NKN config from isaaclab_remote_connection.json
-        config_file = PROJECT_ROOT / "isaaclab_remote_connection.json"
-        with open(config_file, 'r') as f:
-            config = json.load(f)
+            # Load NKN config from isaaclab_remote_connection.json
+            config_file = PROJECT_ROOT / "isaaclab_remote_connection.json"
+            print(f"[train.py] Loading config from: {config_file}", flush=True)
+            with open(config_file, 'r') as f:
+                config = json.load(f)
 
-        nkn_cfg = config.get("nkn", {})
+            nkn_cfg = config.get("nkn", {})
+            print(f"[train.py] Config loaded successfully", flush=True)
+        except Exception as e:
+            print(f"[train.py] ERROR during setup: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
 
         # CRITICAL: Use a DIFFERENT identifier than app.py to avoid address conflicts
         # app.py uses "dropbear_app", we use "dropbear_train"
@@ -400,6 +416,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
 if __name__ == "__main__":
     # run the main function
+    print("=" * 80, flush=True)
+    print("[train.py] About to call main() function", flush=True)
+    print(f"[train.py] args_cli.remote_worker_address before main() = {args_cli.remote_worker_address}", flush=True)
+    print("=" * 80, flush=True)
     main()
+    print("=" * 80, flush=True)
+    print("[train.py] main() function returned", flush=True)
+    print("=" * 80, flush=True)
     # close sim app
     simulation_app.close()
