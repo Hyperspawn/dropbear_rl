@@ -140,9 +140,9 @@ class RemoteVecEnv:
 
     def _handle_network_message(self, src: str, body: Dict[str, Any]) -> None:
         """Handle incoming network messages."""
-        # Only process messages from controller
-        if src != self.controller_address:
-            # Pass to original handler
+        # Only process messages from controller (allow subclient suffix)
+        expected = self.controller_address
+        if expected and not src.startswith(expected):
             if self._original_on_message:
                 self._original_on_message(src, body)
             return

@@ -75,8 +75,9 @@ class ControllerRemoteEnvWrapper:
 
     def _handle_network_message(self, src: str, body: Dict[str, Any]) -> None:
         """Handle incoming network messages."""
-        # Only process action messages from our worker
-        if src != self.worker_address:
+        # Only process action messages from our worker (allow subclient suffix)
+        expected = self.worker_address
+        if expected and not src.startswith(expected):
             if self._original_on_message:
                 self._original_on_message(src, body)
             return
