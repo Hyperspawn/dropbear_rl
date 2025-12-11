@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import os
@@ -8,6 +9,7 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -162,6 +164,9 @@ class NKNSidecar:
         self._stdout_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
         self._sender_thread: Optional[threading.Thread] = None
+        self._chunk_limit = int(os.environ.get("NKN_DM_MAX_BYTES", "900000"))
+        self._chunk_buffers: Dict[str, Dict[str, Any]] = {}
+        self._chunk_lock = threading.Lock()
 
     def start(self) -> None:
         ensure_nkn_bridge()
@@ -217,7 +222,33 @@ class NKNSidecar:
         return self.ready_event.wait(timeout)
 
     def send_dm(self, to: str, data: Dict[str, Any], opts: Optional[Dict[str, Any]] = None) -> None:
-        payload = (to, data, opts or {})
+        opts = opts or {}
+        try:
+            raw = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        except Exception:
+            raw = b""
+
+        if raw and len(raw) > self._chunk_limit:
+            chunk_id = uuid.uuid4().hex
+            chunk_size = max(1, self._chunk_limit - 4096)
+            total = (len(raw) + chunk_size - 1) // chunk_size
+            for idx in range(total):
+                start = idx * chunk_size
+                end = min(len(raw), start + chunk_size)
+                part = raw[start:end]
+                chunk_msg = {
+                    "__chunk": True,
+                    "chunk_id": chunk_id,
+                    "idx": idx,
+                    "total": total,
+                    "data": base64.b64encode(part).decode("ascii"),
+                }
+                self._enqueue_payload((to, chunk_msg, opts))
+        else:
+            self._enqueue_payload((to, data, opts))
+
+    def _enqueue_payload(self, payload: tuple[str, Dict[str, Any], Dict[str, Any]]) -> None:
+        to, data, opts = payload
         try:
             self.send_queue.put_nowait(payload)
         except queue.Full:
@@ -226,7 +257,7 @@ class NKNSidecar:
             self.send_queue.put(payload)
         self._messages_out += 1
         try:
-            self._bytes_out += len(json.dumps({"to": to, "data": data, "opts": opts or {}}).encode("utf-8"))
+            self._bytes_out += len(json.dumps({"to": to, "data": data, "opts": opts}).encode("utf-8"))
         except Exception:
             pass
 
@@ -276,7 +307,9 @@ class NKNSidecar:
                 src = msg.get("src", "")
                 body = msg.get("msg", {})
                 if self.on_message and isinstance(body, dict):
-                    self.on_message(src, body)
+                    reconstructed = self._handle_chunk(src, body)
+                    if reconstructed is not None:
+                        self.on_message(src, reconstructed)
             elif typ == "err":
                 if self.on_error:
                     self.on_error(msg.get("msg", "bridge error"))
@@ -321,3 +354,41 @@ class NKNSidecar:
                 else:
                     time.sleep(0.2)
             self.send_queue.task_done()
+
+    def _handle_chunk(self, src: str, body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Reassemble chunked DMs produced by send_dm when payload exceeds limit."""
+        if "__chunk" not in body:
+            return body
+        try:
+            chunk_id = str(body.get("chunk_id"))
+            total = int(body.get("total", 0))
+            idx = int(body.get("idx", -1))
+            data_b64 = body.get("data", "")
+        except Exception:
+            return None
+        if not chunk_id or total <= 0 or idx < 0 or idx >= total:
+            return None
+        try:
+            part = base64.b64decode(data_b64.encode("ascii"))
+        except Exception:
+            return None
+        with self._chunk_lock:
+            buf = self._chunk_buffers.get(chunk_id)
+            if buf is None:
+                buf = {"total": total, "parts": {}, "ts": time.time()}
+                self._chunk_buffers[chunk_id] = buf
+            buf["parts"][idx] = part
+            # cleanup stale buffers older than 5 minutes
+            cutoff = time.time() - 300
+            self._chunk_buffers = {
+                cid: b for cid, b in self._chunk_buffers.items() if b.get("ts", 0) >= cutoff
+            }
+            if len(buf["parts"]) < total:
+                return None
+            ordered = [buf["parts"][i] for i in range(total)]
+            raw = b"".join(ordered)
+            self._chunk_buffers.pop(chunk_id, None)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
