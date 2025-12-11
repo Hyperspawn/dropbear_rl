@@ -134,7 +134,15 @@ class StubVecEnv:
         Returns:
             Dictionary with "policy" key containing observation tensor
         """
-        return self._obs_dict
+        # RSL-RL calls .to(device) on the result, so we need to wrap in a subclass
+        class ObsDict(dict):
+            """Dict subclass that supports .to() method for RSL-RL compatibility."""
+            def to(self, device):
+                """Move all tensors in the dict to the specified device."""
+                return ObsDict({k: v.to(device) if isinstance(v, torch.Tensor) else v
+                               for k, v in self.items()})
+
+        return ObsDict(self._obs_dict)
 
     def close(self) -> None:
         """Clean up environment resources."""

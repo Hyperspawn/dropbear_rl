@@ -241,7 +241,16 @@ class RemoteVecEnv:
         """
         if self._current_obs is None:
             raise RuntimeError("[remote_env] No observations available, call reset() first")
-        return self._current_obs
+
+        # RSL-RL calls .to(device) on the result, so we need to wrap in a subclass
+        class ObsDict(dict):
+            """Dict subclass that supports .to() method for RSL-RL compatibility."""
+            def to(self, device):
+                """Move all tensors in the dict to the specified device."""
+                return ObsDict({k: v.to(device) if isinstance(v, torch.Tensor) else v
+                               for k, v in self.items()})
+
+        return ObsDict(self._current_obs)
 
     def close(self) -> None:
         """Clean up resources."""
