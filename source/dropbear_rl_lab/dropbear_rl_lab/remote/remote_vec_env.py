@@ -126,8 +126,8 @@ class RemoteVecEnv:
         self.common_step_counter = 0
 
         # Register message handler
-        self._original_on_message = nkn_bridge._on_message
-        nkn_bridge._on_message = self._handle_network_message
+        self._original_on_message = getattr(nkn_bridge, "on_message", None)
+        nkn_bridge.on_message = self._handle_network_message
 
         print(f"[remote_env] Initialized for {num_envs} envs, waiting for obs from {controller_address}")
 
@@ -272,5 +272,5 @@ class RemoteVecEnv:
         """Clean up resources."""
         print("[remote_env] Closing remote environment")
         # Restore original message handler
-        if hasattr(self, '_original_on_message'):
-            self.nkn_bridge._on_message = self._original_on_message
+        if getattr(self, "_original_on_message", None):
+            self.nkn_bridge.on_message = self._original_on_message

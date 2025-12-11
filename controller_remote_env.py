@@ -55,8 +55,8 @@ class ControllerRemoteEnvWrapper:
         self.step_counter = 0
 
         # Register message handler
-        self._original_on_message = nkn_bridge._on_message
-        nkn_bridge._on_message = self._handle_network_message
+        self._original_on_message = getattr(nkn_bridge, "on_message", None)
+        nkn_bridge.on_message = self._handle_network_message
 
         # Delegate all attributes to base_env
         self.num_envs = base_env.num_envs
@@ -70,8 +70,8 @@ class ControllerRemoteEnvWrapper:
         """Handle incoming network messages."""
         # Only process action messages from our worker
         if src != self.worker_address:
-            if self._original_on_message:
-                self._original_on_message(src, body)
+                    if self._original_on_message:
+                        self._original_on_message(src, body)
             return
 
         try:
@@ -174,8 +174,8 @@ class ControllerRemoteEnvWrapper:
     def close(self):
         """Clean up resources."""
         print("[controller_env] Closing controller wrapper")
-        if hasattr(self, '_original_on_message'):
-            self.nkn_bridge._on_message = self._original_on_message
+        if getattr(self, "_original_on_message", None):
+            self.nkn_bridge.on_message = self._original_on_message
         if hasattr(self.base_env, 'close'):
             self.base_env.close()
 

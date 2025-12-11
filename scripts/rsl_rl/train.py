@@ -234,7 +234,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         )
 
         # Register message handler for checkpoints
-        original_on_message = nkn_bridge._on_message
+        original_on_message = getattr(nkn_bridge, "on_message", None)
 
         def checkpoint_message_handler(src: str, body: dict):
             """Handle checkpoint transfer messages."""
@@ -254,14 +254,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     pass
                 else:
                     # Pass through to original handler
-                    if original_on_message:
-                        original_on_message(src, body)
+                        if original_on_message:
+                            original_on_message(src, body)
             except Exception as e:
                 print(f"[train.py] Error handling message: {e}")
                 if original_on_message:
                     original_on_message(src, body)
 
-        nkn_bridge._on_message = checkpoint_message_handler
+        nkn_bridge.on_message = checkpoint_message_handler
         print("[train.py] Checkpoint receiver enabled - will save models from A100")
     else:
         print("[train.py] Local mode: simulation and policy both on RTX")
