@@ -78,86 +78,61 @@ def _dump_run_configs(log_dir: Path, env_cfg: RemoteEnvCfg, agent_cfg: RemoteAge
     dump_pickle_file(params_dir / "agent.pkl", agent_cfg.to_dict())
 
 
-def _build_remote_env(
-    env_cfg: RemoteEnvCfg,
-    agent_cfg: RemoteAgentCfg,
-    controller_address: Optional[str],
-) -> tuple[Any, Optional[NKNSidecar]]:
-    if controller_address:
-        print(f"[train_remote] Connecting to controller at {controller_address}")
-        bridge = _start_nkn_bridge(controller_address)
-        env = RemoteVecEnv(
-            num_envs=env_cfg.scene.num_envs,
-            num_obs=env_cfg.num_obs,
-            num_actions=env_cfg.num_actions,
-            nkn_bridge=bridge,
-            controller_address=controller_address,
-            device=agent_cfg.device,
-            timeout=30.0,
-        )
-        return env, bridge
-    stub_env = build_stub_env(
-        task_name=env_cfg.task_name,
-        num_envs=env_cfg.scene.num_envs,
-        num_obs=env_cfg.num_obs,
-        num_actions=env_cfg.num_actions,
-        device=agent_cfg.device,
-    )
-    return stub_env, None
+def _wait_for_train_address_via_nkn(bridge: NKNSidecar, timeout: float = 30.0) -> Optional[str]:
+    """Wait for train.py to send its NKN address via direct message.
 
-
-def _load_controller_address(wait_for_train_address: bool = True) -> Optional[str]:
-    """Load controller address, preferring train_address over app_address.
-
-    train_address = train.py's NKN bridge (where to send actions)
-    app_address = app.py's NKN bridge (used for handshake only)
+    train.py will send a message with type="train_address_announcement"
+    containing its NKN address where we should send actions.
 
     Args:
-        wait_for_train_address: If True, wait up to 10s for train_address to appear
+        bridge: Our NKN bridge to receive messages
+        timeout: How long to wait for the announcement
 
     Returns:
-        Controller NKN address or None
+        train.py's NKN address or None if timeout
     """
     import time
 
-    # If we should wait for train_address, poll the config file
-    if wait_for_train_address:
-        print("[train_remote] Waiting for train.py to publish its NKN address...")
-        print("[train_remote] (This can take 15-20s while Isaac Sim starts up...)")
-        for attempt in range(60):  # 60 attempts * 0.5s = 30s max (Isaac Sim startup time)
-            cfg = _load_connection_config()
-            nkn_cfg = cfg.get("nkn", {})
-            train_addr = str(nkn_cfg.get("train_address") or "").strip()
+    print("[train_remote] Waiting for train.py to announce its NKN address...")
+    print("[train_remote] (This can take 15-20s while Isaac Sim starts up...)")
 
+    received_address = [None]  # Use list to allow modification in nested function
+
+    def _message_handler(src: str, body: dict):
+        """Handle incoming NKN messages looking for train_address_announcement"""
+        msg_type = body.get("type", "")
+        if msg_type == "train_address_announcement":
+            train_addr = body.get("train_address", "")
             if train_addr:
-                print(f"[train_remote] ✓ Found train_address: {train_addr}")
-                return train_addr
+                print(f"[train_remote] ✓ Received train_address from {src}: {train_addr}")
+                received_address[0] = train_addr
+            else:
+                print(f"[train_remote] ⚠ Received announcement but no train_address in message")
 
-            if attempt % 10 == 0 and attempt > 0:
-                print(f"[train_remote] Still waiting... ({attempt * 0.5:.0f}s elapsed)")
+    # Register temporary message handler
+    original_handler = getattr(bridge, "on_message", None)
+    bridge.on_message = _message_handler
+
+    start_time = time.time()
+    try:
+        while time.time() - start_time < timeout:
+            if received_address[0]:
+                return received_address[0]
+
+            elapsed = time.time() - start_time
+            if int(elapsed) % 5 == 0 and int(elapsed) > 0:
+                # Print progress every 5 seconds
+                remaining = int(timeout - elapsed)
+                print(f"[train_remote] Still waiting... ({int(elapsed)}s elapsed, {remaining}s remaining)")
 
             time.sleep(0.5)
 
-        print("[train_remote] ⚠ Timeout waiting for train_address (30s), falling back to app_address")
-        print("[train_remote] ⚠ This may cause address conflicts!")
-
-    # Load without waiting (or after timeout)
-    cfg = _load_connection_config()
-    nkn_cfg = cfg.get("nkn", {})
-
-    # Prefer train_address if available
-    train_addr = str(nkn_cfg.get("train_address") or "").strip()
-    if train_addr:
-        print(f"[train_remote] Using train_address: {train_addr}")
-        return train_addr
-
-    # Fallback to app_address
-    app_addr = str(nkn_cfg.get("app_address") or "").strip()
-    if app_addr:
-        print(f"[train_remote] Using app_address (fallback): {app_addr}")
-        return app_addr
-
-    return None
+        print(f"[train_remote] ⚠ Timeout waiting for train_address announcement ({timeout}s)")
+        return None
+    finally:
+        # Restore original handler
+        if original_handler:
+            bridge.on_message = original_handler
 
 
 # Create debug log file
@@ -217,19 +192,44 @@ def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
     agent_cfg.update_from_cli(args_cli)
     env_cfg.seed = agent_cfg.seed
 
-    # Determine controller address (prefer CLI arg over config)
-    controller_address = args_cli.app_address or _load_controller_address()
+    # Start NKN bridge first (we need it to receive train_address announcement)
+    print("=" * 80)
+    print("[train_remote] STARTUP - Initializing NKN bridge")
+    print("=" * 80)
+
+    # We need app_address (from CLI arg) to send the initial handshake
+    app_address = args_cli.app_address
+    if not app_address:
+        print("[train_remote] ⚠ ERROR: --app-address not provided!")
+        print("[train_remote] ⚠ Cannot proceed without controller address")
+        print("[train_remote] ⚠ Falling back to STUB environment (no real training)")
+        controller_address = None
+        bridge = None
+    else:
+        print(f"[train_remote] Controller app_address (for handshake): {app_address}")
+        # Start our NKN bridge
+        bridge = _start_nkn_bridge(app_address)
+        print(f"[train_remote] ✓ Our NKN bridge started: {bridge.address}")
+
+        # Wait for train.py to announce its train_address via NKN
+        print("[train_remote] Waiting for train.py to announce train_address...")
+        controller_address = _wait_for_train_address_via_nkn(bridge, timeout=40.0)
+
+        if controller_address:
+            print(f"[train_remote] ✓ Received train_address: {controller_address}")
+        else:
+            print("[train_remote] ⚠ Timeout waiting for train_address!")
+            print("[train_remote] ⚠ Falling back to app_address (may cause conflicts)")
+            controller_address = app_address
 
     print("=" * 80)
     print("[train_remote] STARTUP CONFIGURATION")
     print("=" * 80)
-    print(f"[train_remote] Command-line arg --app-address: {args_cli.app_address or '<not provided>'}")
-    print(f"[train_remote] Config file controller address: {_load_controller_address() or '<not found>'}")
-    print(f"[train_remote] Final controller address: {controller_address or '<NONE - will use stub env>'}")
+    print(f"[train_remote] Controller address for actions: {controller_address or '<NONE - will use stub env>'}")
 
     if controller_address:
         print("[train_remote] ✓ Running in PRODUCTION mode (Controller-driven observations)")
-        print(f"[train_remote] ✓ Will connect to controller at: {controller_address}")
+        print(f"[train_remote] ✓ Will send actions to: {controller_address}")
     else:
         print("[train_remote] ⚠ Controller address not available!")
         print("[train_remote] ⚠ Falling back to STUB environment (no real training)")
@@ -241,7 +241,28 @@ def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
     print(f"[train_remote] Logging to {log_dir}")
     _dump_run_configs(log_dir, env_cfg, agent_cfg)
 
-    env, bridge = _build_remote_env(env_cfg, agent_cfg, controller_address)
+    # Build environment (bridge already created above if needed)
+    if controller_address and bridge:
+        print(f"[train_remote] Creating RemoteVecEnv connected to {controller_address}")
+        env = RemoteVecEnv(
+            num_envs=env_cfg.scene.num_envs,
+            num_obs=env_cfg.num_obs,
+            num_actions=env_cfg.num_actions,
+            nkn_bridge=bridge,
+            controller_address=controller_address,
+            device=agent_cfg.device,
+            timeout=30.0,
+        )
+    else:
+        print("[train_remote] Creating stub environment (no remote connection)")
+        env = build_stub_env(
+            task_name=env_cfg.task_name,
+            num_envs=env_cfg.scene.num_envs,
+            num_obs=env_cfg.num_obs,
+            num_actions=env_cfg.num_actions,
+            device=agent_cfg.device,
+        )
+        bridge = None
 
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True

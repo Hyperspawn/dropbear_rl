@@ -238,12 +238,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[train.py] Train NKN address: {train_nkn_address}")
         print(f"[train.py] Worker will send actions TO this address")
 
-        # Update config file with train.py's address so A100 knows where to send
+        # Update config file with train.py's address (local only)
         nkn_cfg["train_address"] = train_nkn_address
         config["nkn"] = nkn_cfg
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
-        print(f"[train.py] Updated config with train_address for A100")
+
+        # CRITICAL: Send train_address directly to A100 worker via NKN
+        # The config file update above only updates RTX's local file,
+        # but A100 has a separate config file on a different machine!
+        print(f"[train.py] Sending train_address to worker: {worker_address}")
+        nkn_bridge.send_dm(worker_address, {
+            "type": "train_address_announcement",
+            "train_address": train_nkn_address,
+            "description": "train.py NKN bridge address for receiving actions"
+        })
+        print(f"[train.py] ✓ Sent train_address to A100 worker")
 
         from controller_remote_env import ControllerRemoteEnvWrapper
         env = ControllerRemoteEnvWrapper(
