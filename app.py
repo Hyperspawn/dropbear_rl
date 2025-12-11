@@ -1792,14 +1792,27 @@ def main() -> int:
                     train_args.append("--headless")
 
                 # Pass worker address to train.py (train.py runs in Isaac Sim environment)
+                print(f"[i] ========================================")
+                print(f"[i] TRAIN.PY ARGUMENTS")
+                print(f"[i] ========================================")
                 if remote_addr:
                     train_args.append(f"--remote_worker_address={remote_addr}")
-                    print(f"[i] Passing worker address to train.py: {remote_addr}")
+                    print(f"[i] ✓ Adding --remote_worker_address={remote_addr}")
+                    print(f"[i]   train.py will wrap env with ControllerRemoteEnvWrapper")
+                else:
+                    print(f"[i] ⚠ WARNING: remote_addr is empty!")
+                    print(f"[i] ⚠ NOT adding --remote_worker_address")
+                    print(f"[i] ⚠ train.py will run LOCALLY (no remote policy)")
+                    print(f"[i] ⚠ This means BOTH sim and policy on RTX!")
+                print(f"[i] ========================================")
 
                 train_args += unknown
                 cmd = base_cmd + [script_path] + train_args
-                print(f"[i] RTX will run: {' '.join(cmd)}")
-                print("[i] RTX sends obs → A100 computes actions → RTX applies to sim")
+                print(f"[i] Full command: {' '.join(cmd)}")
+                if remote_addr:
+                    print("[i] Expected flow: RTX sends obs → A100 computes actions → RTX applies to sim")
+                else:
+                    print("[i] ⚠ Actual flow: RTX does EVERYTHING locally (no A100 involvement)")
                 run_cmd(cmd, cwd=repo_dir, env=run_env)
             else:
                 # Use train.py for local RTX controller (with IsaacLab)
