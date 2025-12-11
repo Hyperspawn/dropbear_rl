@@ -11,5 +11,11 @@ on remote A100 workers without IsaacLab dependencies.
 
 from .env_builder import build_stub_env
 from .config_helpers import load_task_config, apply_hydra_overrides
+from .remote_vec_env import RemoteVecEnv
 
-__all__ = ["build_stub_env", "load_task_config", "apply_hydra_overrides"]
+__all__ = [
+    "build_stub_env",
+    "load_task_config",
+    "apply_hydra_overrides",
+    "RemoteVecEnv",
+]

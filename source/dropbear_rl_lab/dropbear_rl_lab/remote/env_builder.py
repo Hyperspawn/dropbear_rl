@@ -98,6 +98,12 @@ class StubVecEnv:
         self._dones = torch.zeros(num_envs, device=self.device, dtype=torch.bool)
         self._info = {}
 
+        # Additional attributes required by RSL-RL OnPolicyRunner
+        self.max_episode_length = 1000  # Default episode length
+        self.episode_length_buf = torch.zeros(num_envs, device=self.device, dtype=torch.long)
+        self.reset_buf = torch.zeros(num_envs, device=self.device, dtype=torch.bool)
+        self.common_step_counter = 0
+
     def reset(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         """Reset the environment.
 
