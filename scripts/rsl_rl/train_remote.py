@@ -187,7 +187,8 @@ def main(provided_sidecar=None, argv=None):
             nkn_bridge=nkn_bridge,
             controller_address=controller_address,
             device=task_config.get("device", "cuda:0"),
-            timeout=120.0,
+            # Allow generous startup window for Isaac Sim to reset and send first obs
+            timeout=300.0,
         )
         print(f"[train_remote] RemoteVecEnv initialized - waiting for obs from {controller_address}")
     else:
