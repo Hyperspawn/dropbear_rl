@@ -72,6 +72,10 @@ class ControllerRemoteEnvWrapper:
         print(f"[controller_env] DEBUG: Expected worker: {self.worker_address}", flush=True)
 
         try:
+            if not isinstance(body, dict) or "msg_type" not in body:
+                if self._original_on_message:
+                    self._original_on_message(src, body)
+                return
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
             print(f"[controller_env] DEBUG: Processed message type: {processed.msg_type if processed else 'None'}", flush=True)

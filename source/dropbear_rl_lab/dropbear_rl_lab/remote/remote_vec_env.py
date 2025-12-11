@@ -138,6 +138,10 @@ class RemoteVecEnv:
         print(f"[remote_env] DEBUG: My NKN address: {self.nkn_bridge.address}", flush=True)
 
         try:
+            if not isinstance(body, dict) or "msg_type" not in body:
+                if self._original_on_message:
+                    self._original_on_message(src, body)
+                return
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
             print(f"[remote_env] DEBUG: Processed message type: {processed.msg_type if processed else 'None'}", flush=True)
