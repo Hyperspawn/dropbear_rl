@@ -143,6 +143,7 @@ class RemoteVecEnv:
         # Only process messages from controller (allow subclient suffix)
         expected = self.controller_address
         if expected and not src.startswith(expected):
+            print(f"[remote_env] Ignoring message from {src}; expected {expected}")
             if self._original_on_message:
                 self._original_on_message(src, body)
             return

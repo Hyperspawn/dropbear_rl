@@ -165,6 +165,9 @@ def main(provided_sidecar=None, argv=None):
             except Exception as exc:
                 print(f"[train_remote] Failed to start NKN sidecar: {exc}")
                 nkn_bridge = None
+        if controller_address and nkn_bridge:
+            print(f"[train_remote] Controller address: {controller_address}")
+            print(f"[train_remote] Worker address: {nkn_bridge.address}")
 
     if controller_address:
         print("[train_remote] ========================================")

@@ -78,6 +78,7 @@ class ControllerRemoteEnvWrapper:
         # Only process action messages from our worker (allow subclient suffix)
         expected = self.worker_address
         if expected and not src.startswith(expected):
+            print(f"[controller_env] Ignoring message from {src}; expected {expected}")
             if self._original_on_message:
                 self._original_on_message(src, body)
             return
