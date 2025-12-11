@@ -307,12 +307,12 @@ def main(provided_sidecar=None, argv=None):
     # If running against a controller, push a heavier workload to use the A100.
     # These are intentionally high, but not extreme, and keep shapes consistent.
     if controller_address:
-        agent_dict["num_steps_per_env"] = 256
-        agent_dict["num_mini_batches"] = 8
-        agent_dict["num_learning_epochs"] = 8
+        agent_dict["num_steps_per_env"] = 384
+        agent_dict["num_mini_batches"] = 12
+        agent_dict["num_learning_epochs"] = 10
         agent_dict.setdefault("policy", {})
-        agent_dict["policy"]["actor_hidden_dims"] = [512, 512, 512]
-        agent_dict["policy"]["critic_hidden_dims"] = [512, 512, 512]
+        agent_dict["policy"]["actor_hidden_dims"] = [768, 768, 768]
+        agent_dict["policy"]["critic_hidden_dims"] = [768, 768, 768]
 
     # Create log directory
     experiment_name = args_cli.task or "dropbear_remote"

@@ -1710,17 +1710,17 @@ def main() -> int:
 
                 # Remote-heavy defaults to exercise A100, but keep GUI-friendly counts when not headless.
                 if args.headless:
-                    heavy_remote_envs = 32
-                    heavy_steps_per_env = 256
-                    heavy_learning_epochs = 8
-                    heavy_mini_batches = 8
+                    heavy_remote_envs = 40
+                    heavy_steps_per_env = 384
+                    heavy_learning_epochs = 10
+                    heavy_mini_batches = 12
                 else:
                     # When rendering, keep env count modest to avoid IsaacSim overload.
                     heavy_remote_envs = 8
-                    heavy_steps_per_env = 128
-                    heavy_learning_epochs = 6
+                    heavy_steps_per_env = 96
+                    heavy_learning_epochs = 5
                     heavy_mini_batches = 4
-                heavy_hidden_dims = "[512,512,512]"
+                heavy_hidden_dims = "[768,768,768]"
 
                 def _force_override(arg_list: List[str], key: str, value: object) -> None:
                     """Force an override by appending at the end (Hydra last-one-wins).
