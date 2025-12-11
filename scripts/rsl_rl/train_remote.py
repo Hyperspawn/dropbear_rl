@@ -36,6 +36,11 @@ from dropbear_rl_lab.remote import build_stub_env, load_task_config, apply_hydra
 # Import RSL-RL directly (available on remote worker)
 from rsl_rl.runners import OnPolicyRunner
 
+from remote_protocol_rl import (
+    MessageSequencer,
+    create_train_done_message,
+    create_train_start_message,
+)
 print("[train_remote] Running on IsaacLab-free tensor worker")
 print("[train_remote] This script never imports IsaacLab modules")
 
@@ -140,6 +145,8 @@ def main():
             num_actions=task_config.get("num_actions", 12),
             device=task_config.get("device", "cuda:0"),
         )
+
+    train_sequencer = getattr(env, "sequencer", None) or MessageSequencer()
 
     # Create minimal agent configuration
     # In production, this would come from shared config or controller
@@ -274,6 +281,12 @@ def main():
         from checkpoint_transfer_protocol import CheckpointSender
         checkpoint_sender = CheckpointSender(nkn_bridge, env.sequencer if hasattr(env, 'sequencer') else None)
         print("[train_remote] Checkpoint auto-transfer enabled → RTX controller")
+        try:
+            start_msg = create_train_start_message(train_sequencer, task_config, agent_dict)
+            nkn_bridge.send_dm(controller_address, start_msg.to_dict())
+            print("[train_remote] train_start sent to controller")
+        except Exception as exc:
+            print(f"[train_remote] Failed to send train_start: {exc}")
 
     # Run training with checkpoint callback
     save_interval = agent_dict.get("save_interval", 50)
@@ -307,6 +320,16 @@ def main():
     print("[train_remote] Training completed on remote worker")
     if controller_address:
         print("[train_remote] All checkpoints transferred to RTX controller")
+        try:
+            done_msg = create_train_done_message(
+                train_sequencer,
+                iterations=agent_dict.get("max_iterations", 0),
+                log_dir=log_dir,
+            )
+            nkn_bridge.send_dm(controller_address, done_msg.to_dict())
+            print("[train_remote] train_done sent to controller")
+        except Exception as exc:
+            print(f"[train_remote] Failed to send train_done: {exc}")
     else:
         print("[train_remote] No controller - checkpoints remain on A100")
 

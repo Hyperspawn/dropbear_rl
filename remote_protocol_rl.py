@@ -226,6 +226,20 @@ def create_train_start_message(
     return sequencer.create_message(MSG_TRAIN_START, payload)
 
 
+def create_train_done_message(
+    sequencer: MessageSequencer,
+    iterations: int,
+    log_dir: str = "",
+) -> MessageEnvelope:
+    """Create training completion message."""
+    payload = {
+        "iterations": iterations,
+    }
+    if log_dir:
+        payload["log_dir"] = log_dir
+    return sequencer.create_message(MSG_TRAIN_DONE, payload)
+
+
 def create_obs_batch_message(
     sequencer: MessageSequencer,
     step_id: int,
