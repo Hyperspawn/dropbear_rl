@@ -48,7 +48,8 @@ DROPBEAR_CFG = DropbearArticulationCfg(
         usd_path=f"{DROPBEAR_MODEL_DIR}/Dropbear/usd/dropbear.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=True,  # Disable gravity to prevent physics explosions
+            # Enable gravity so the base is dynamic
+            disable_gravity=False,
             retain_accelerations=False,
             linear_damping=0.1,  # Add some damping for stability
             angular_damping=0.1,  # Add some damping for stability
@@ -59,10 +60,10 @@ DROPBEAR_CFG = DropbearArticulationCfg(
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=False,  # Disable self-collisions for stability
-            solver_position_iteration_count=4,  # Reduce iterations for stability
-            solver_velocity_iteration_count=0,  # Reduce for stability
-            # Enable debugging joint to fix robot to world
-            fix_root_link=True,  # Disable debugging_joint to prevent coordinate explosions
+            solver_position_iteration_count=6,
+            solver_velocity_iteration_count=1,
+            # Allow the root link to move freely (no fixed joint to world)
+            fix_root_link=False,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
