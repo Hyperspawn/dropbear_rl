@@ -150,6 +150,9 @@ class RemoteVecEnv:
 
             if processed and processed.msg_type == MSG_OBS_BATCH:
                 # Only accept obs from controller (allow subclient suffix)
+                if not self.controller_address:
+                    self.controller_address = src
+                    print(f"[remote_env] Learned controller address: {src}")
                 expected = self.controller_address
                 if expected and not src.startswith(expected):
                     print(f"[remote_env] Dropping obs from {src}; expected {expected}")

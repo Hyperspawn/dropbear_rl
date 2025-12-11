@@ -92,6 +92,9 @@ class ControllerRemoteEnvWrapper:
                 return
 
             if processed and processed.msg_type == MSG_ACTION_BATCH:
+                if not self.worker_address:
+                    self.worker_address = src
+                    print(f"[controller_env] Learned worker address: {src}")
                 # Queue action message
                 self.action_queue.put(processed, block=False)
                 print(f"[controller_env] Received actions for step {processed.payload['step_id']}")

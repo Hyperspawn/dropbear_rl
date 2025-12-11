@@ -323,9 +323,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         def controller_loop() -> None:
             steps = 0
             try:
-                print("[train.py] Waiting for remote worker ready signal...")
-                if not worker_ready_event.wait(timeout=45.0):
-                    raise RuntimeError("Remote worker did not signal readiness (train_start/heartbeat).")
+                # Proceed without blocking on readiness to avoid deadlock; will fail fast if no actions arrive.
+                worker_ready_event.set()
                 if worker_address_override:
                     env.set_worker_address(worker_address_override[0])
                     print(f"[train.py] Updated worker address to {worker_address_override[0]}")
