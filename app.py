@@ -1729,22 +1729,38 @@ def main() -> int:
                 remote_addr = ""
                 controller_addr = ""
                 if cfg.get("mode") == "nkn":
+                    print("[i] ========================================")
+                    print("[i] NKN HANDSHAKE")
+                    print("[i] ========================================")
+                    print("[i] Waiting for NKN handshake to complete (max 30s)...")
                     if not remote_client.wait_for_nkn_handshake(timeout=30.0):
                         raise RuntimeError("NKN handshake incomplete; wait for the remote agent to connect.")
+                    print("[i] ✓ Handshake complete!")
+
                     target = remote_client.get_nkn_target()
                     remote_addr = remote_client.get_nkn_remote_address()
                     controller_addr = remote_client.get_nkn_app_address()
+
                     print(f"[i] NKN target: {target or 'unset'}")
                     if controller_addr:
-                        print(f"[i] Controller NKN address: {controller_addr} (provide this to the remote agent)")
+                        print(f"[i] ✓ Controller NKN address: {controller_addr}")
+                        print(f"[i]   (This will be passed to A100 as --app-address)")
                     else:
-                        print("[i] Controller NKN address pending sidecar readiness.")
+                        print("[i] ⚠ WARNING: Controller NKN address not available!")
+                        print("[i]   This means A100 cannot connect back to RTX!")
+                        print("[i]   Training will fall back to stub environment!")
                     if remote_addr:
-                        print(f"[i] A100 worker address: {remote_addr}")
+                        print(f"[i] ✓ A100 worker address: {remote_addr}")
                     else:
-                        print("[i] Remote agent address pending handshake.")
+                        print("[i] ⚠ WARNING: Remote agent address not available!")
+                    print("[i] ========================================")
+
                 if controller_addr:
                     remote_train_args.append(f"--app-address={controller_addr}")
+                    print(f"[i] Added --app-address={controller_addr} to train_remote.py arguments")
+                else:
+                    print("[i] ⚠ NOT adding --app-address (controller address unknown)")
+                    print("[i] ⚠ A100 will fall back to stub environment!")
 
                 remote_cmd = ["python", str(remote_script_rel)] + remote_train_args
 

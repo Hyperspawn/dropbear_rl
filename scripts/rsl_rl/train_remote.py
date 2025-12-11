@@ -146,11 +146,24 @@ def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
     agent_cfg.update_from_cli(args_cli)
     env_cfg.seed = agent_cfg.seed
 
+    # Determine controller address (prefer CLI arg over config)
     controller_address = args_cli.app_address or _load_controller_address()
+
+    print("=" * 80)
+    print("[train_remote] STARTUP CONFIGURATION")
+    print("=" * 80)
+    print(f"[train_remote] Command-line arg --app-address: {args_cli.app_address or '<not provided>'}")
+    print(f"[train_remote] Config file controller address: {_load_controller_address() or '<not found>'}")
+    print(f"[train_remote] Final controller address: {controller_address or '<NONE - will use stub env>'}")
+
     if controller_address:
-        print("[train_remote] Running in production mode (Controller-driven observations).")
+        print("[train_remote] ✓ Running in PRODUCTION mode (Controller-driven observations)")
+        print(f"[train_remote] ✓ Will connect to controller at: {controller_address}")
     else:
-        print("[train_remote] Controller address not available → falling back to stub environment.")
+        print("[train_remote] ⚠ Controller address not available!")
+        print("[train_remote] ⚠ Falling back to STUB environment (no real training)")
+        print("[train_remote] ⚠ This means NO observations from RTX controller!")
+    print("=" * 80)
 
     log_root, log_dir = build_log_paths(agent_cfg.experiment_name, agent_cfg.run_name)
     ensure_log_directory(log_root, log_dir)
