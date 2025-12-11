@@ -433,6 +433,8 @@ class NKNRemoteAgent:
         self._running = False
         self._handshake_lock = threading.Lock()
         self._handshake_sent = False
+        self.train_address = ""
+        self.train_address_event = threading.Event()
 
     def _log(self, message: str) -> None:
         self.display.record_log(message)
@@ -524,6 +526,8 @@ class NKNRemoteAgent:
             if train_addr:
                 self._log(f"[remote] Received train_address announcement: {train_addr}")
                 _update_connection_config(train_address=train_addr)
+                self.train_address = train_addr
+                self.train_address_event.set()
             else:
                 self._log("[remote] Received train_address announcement without address")
             return
@@ -545,6 +549,20 @@ class NKNRemoteAgent:
         if not isinstance(cmd, list):
             send({"type": "error", "message": "Invalid command payload."})
             return
+        is_train_remote = any("train_remote.py" in str(part) for part in cmd)
+        if is_train_remote:
+            train_addr = self.train_address
+            if not train_addr:
+                self._log("[remote] Waiting for train_address announcement before launching remote trainer...")
+                self.train_address_event.clear()
+                if self.train_address_event.wait(timeout=20.0):
+                    train_addr = self.train_address
+            if train_addr:
+                arg = f"--train-address={train_addr}"
+                if arg not in cmd:
+                    cmd = list(cmd) + [arg]
+                    body["cmd"] = cmd
+                    self._log(f"[remote] Appended {arg} to command")
         cmd_lower = " ".join(str(part).lower() for part in cmd)
         if "train_remote.py" in cmd_lower:
             controller_addr = _load_controller_address_from_config()

@@ -41,6 +41,7 @@ def _load_connection_config() -> Dict[str, Any]:
     if not CONFIG_FILE.exists():
         return {}
     try:
+        print(f"[train_remote] Loading config from {CONFIG_FILE}", flush=True)
         return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
@@ -83,6 +84,8 @@ def _wait_for_train_address_from_config(timeout: float = 40.0, poll: float = 0.5
     start_time = time.time()
     while time.time() - start_time < timeout:
         cfg = _load_connection_config()
+        cfg = _load_connection_config()
+        print(f"[train_remote] DEBUG: Config snapshot: {cfg.get('nkn', {})}", flush=True)
         nkn_cfg = cfg.get("nkn", {})
         train_address = str(nkn_cfg.get("train_address") or "").strip()
         if train_address:
@@ -120,6 +123,7 @@ parser.add_argument("--distributed", action="store_true", default=False, help="R
 parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on.")
 parser.add_argument("--headless", action="store_true", default=False, help="Headless mode (ignored on remote).")
 parser.add_argument("--app-address", type=str, default=None, help="Controller/app NKN address for handshake.")
+parser.add_argument("--train-address", type=str, default=None, help="Controller train NKN address for receiving actions.")
 cli_args.add_rsl_rl_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
@@ -160,11 +164,15 @@ def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
 
     # We need app_address (from CLI arg) to send the initial handshake
     app_address = args_cli.app_address
+    controller_address = None
+    train_address_arg = args_cli.train_address
+    if train_address_arg:
+        controller_address = train_address_arg.strip()
+        print(f"[train_remote] Received --train-address CLI override: {controller_address}")
     if not app_address:
         print("[train_remote] ⚠ ERROR: --app-address not provided!")
-        print("[train_remote] ⚠ Cannot proceed without controller address")
+        print("[train_remote] ⚠ Cannot proceed without controller handshake")
         print("[train_remote] ⚠ Falling back to STUB environment (no real training)")
-        controller_address = None
         bridge = None
     else:
         print(f"[train_remote] Controller app_address (for handshake): {app_address}")
@@ -172,9 +180,10 @@ def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
         bridge = _start_nkn_bridge(app_address)
         print(f"[train_remote] ✓ Our NKN bridge started: {bridge.address}")
 
-        controller_address = _wait_for_train_address_from_config(timeout=40.0)
+        if not controller_address:
+            controller_address = _wait_for_train_address_from_config(timeout=40.0)
         if controller_address:
-            print(f"[train_remote] ✓ Received train_address from config: {controller_address}")
+            print(f"[train_remote] ✓ Using controller address: {controller_address}")
         else:
             print("[train_remote] ⚠ Timeout waiting for train_address in config!")
             print("[train_remote] ⚠ Falling back to app_address (may cause conflicts)")
