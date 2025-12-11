@@ -11,6 +11,8 @@ import argparse
 import os
 import pickle
 import sys
+import time
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -339,8 +341,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         nkn_bridge.on_message = checkpoint_message_handler
         print("[train.py] Checkpoint receiver enabled - will save models from A100")
-    else:
-        print("[train.py] Local mode: simulation and policy both on RTX")
+
+        _run_remote_controller_loop(env)
+        env.close()
+        _wait_for_remote_checkpoint(log_root_path)
+        return
+    print("[train.py] Local mode: simulation and policy both on RTX")
 
     # create runner from rsl-rl
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=str(log_dir), device=agent_cfg.device)
@@ -370,48 +376,62 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # close the simulator
     env.close()
 
-    # If remote mode, wait for final checkpoint and auto-play
-    if args_cli.remote_worker_address:
-        print("[train.py] ========================================")
-        print("[train.py] Training completed!")
-        print("[train.py] Waiting for final checkpoint from A100...")
-        print("[train.py] ========================================")
+    # finished local training
 
-        # Wait a bit for final checkpoint transfer to complete
-        import time
-        time.sleep(5)
 
-        # Find the latest checkpoint
-        checkpoint_dirs = list(Path(log_root_path).glob("iteration_*"))
-        if checkpoint_dirs:
-            latest_checkpoint_dir = max(checkpoint_dirs, key=lambda p: p.stat().st_mtime)
-            checkpoint_files = list(latest_checkpoint_dir.glob("model_*.pt"))
+def _run_remote_controller_loop(env) -> None:
+    """Keep the IsaacLab controller stepping while the A100 worker provides actions."""
+    print("[train.py] ===== Starting controller loop for remote policy =====")
+    step_count = 0
+    try:
+        env.reset()
+        while True:
+            env.step()
+            step_count += 1
+    except TimeoutError:
+        print("[train.py] Remote policy appear to have finished (timeout waiting for new actions).")
+    except KeyboardInterrupt:
+        print("[train.py] Remote controller loop interrupted by user.")
+    finally:
+        print(f"[train.py] Controller loop ending after {step_count} steps.")
 
-            if checkpoint_files:
-                latest_checkpoint = max(checkpoint_files, key=lambda p: p.stat().st_mtime)
-                print(f"[train.py] Latest checkpoint: {latest_checkpoint}")
-                print(f"[train.py] Ready to visualize!")
-                print(f"[train.py]")
-                print(f"[train.py] To visualize the trained policy, run:")
-                print(f"[train.py]   python3 app.py")
-                print(f"[train.py]   Then select dropbear_play (with remote mode OFF)")
-                print(f"[train.py] Or run directly:")
-                print(f"[train.py]   ./isaaclab.sh -p scripts/rsl_rl/play.py \\")
-                print(f"[train.py]       --task {args_cli.task} \\")
-                print(f"[train.py]       --checkpoint {latest_checkpoint}")
-            else:
-                print(f"[train.py] No checkpoint files found in {latest_checkpoint_dir}")
+
+def _wait_for_remote_checkpoint(log_root_path: str) -> None:
+    """Wait until the checkpoint receiver saves the final artifacts."""
+    print("[train.py] ========================================")
+    print("[train.py] Training completed!")
+    print("[train.py] Waiting for final checkpoint from A100...")
+    print("[train.py] ========================================")
+    time.sleep(5)
+
+    checkpoint_dirs = list(Path(log_root_path).glob("iteration_*"))
+    if checkpoint_dirs:
+        latest_checkpoint_dir = max(checkpoint_dirs, key=lambda p: p.stat().st_mtime)
+        checkpoint_files = list(latest_checkpoint_dir.glob("model_*.pt"))
+        if checkpoint_files:
+            latest_checkpoint = max(checkpoint_files, key=lambda p: p.stat().st_mtime)
+            print(f"[train.py] Latest checkpoint: {latest_checkpoint}")
+            print(f"[train.py] Ready to visualize!")
+            print(f"[train.py]")
+            print(f"[train.py] To visualize the trained policy, run:")
+            print(f"[train.py]   python3 app.py")
+            print(f"[train.py]   Then select dropbear_play (with remote mode OFF)")
+            print(f"[train.py] Or run directly:")
+            print(f"[train.py]   ./isaaclab.sh -p scripts/rsl_rl/play.py \\")
+            print(f"[train.py]       --task {args_cli.task} \\")
+            print(f"[train.py]       --checkpoint {latest_checkpoint}")
         else:
-            print(f"[train.py] No checkpoint directories found in {log_root_path}")
+            print(f"[train.py] No checkpoint files found in {latest_checkpoint_dir}")
+    else:
+        print(f"[train.py] No checkpoint directories found in {log_root_path}")
 
-        # Keep window open so user can see the messages
-        print(f"[train.py]")
-        print(f"[train.py] Press Ctrl+C to exit or close this window")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print(f"[train.py] Exiting...")
+    print(f"[train.py]")
+    print(f"[train.py] Press Ctrl+C to exit or close this window")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(f"[train.py] Exiting...")
 
 
 if __name__ == "__main__":
