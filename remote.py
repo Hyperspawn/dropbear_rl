@@ -376,7 +376,16 @@ class NKNRemoteAgent:
             self._log(f"[remote] NKN error: {message}")
 
     def _on_message(self, src: str, body: Dict[str, Any]) -> None:
-        if not isinstance(body, dict) or body.get("type") != "command":
+        if not isinstance(body, dict):
+            return
+        typ = body.get("type")
+        if typ == "handshake_ack":
+            addr = body.get("address") or ""
+            status = body.get("status") or "controller ready"
+            self._log(f"[remote] Controller handshake ack: {status} ({addr})")
+            self.display.set_status(status)
+            return
+        if typ != "command":
             return
         threading.Thread(target=self._execute_command, args=(src, body), daemon=True).start()
 

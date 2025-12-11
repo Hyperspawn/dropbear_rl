@@ -327,6 +327,20 @@ class _NKNClient:
         except Exception:
             pass
 
+    def _send_handshake_ack(self, target: str) -> None:
+        if not target:
+            return
+        payload: Dict[str, object] = {
+            "type": "handshake_ack",
+            "address": self.app_address or self.sidecar.address or "",
+            "status": "controller ready",
+            "ts": int(time.time() * 1000),
+        }
+        try:
+            self.sidecar.send_dm(target, payload)
+        except Exception:
+            pass
+
     def _on_ready(self, address: str) -> None:
         self.ready_event.set()
         if address:
@@ -347,6 +361,10 @@ class _NKNClient:
         session_id = body.get("session_id")
         if typ == "handshake":
             self._update_remote_address(body.get("address") or body.get("addr"))
+            self._send_handshake_ack(src)
+            return
+        if typ == "handshake_ack":
+            _remote_log(body.get("status") or "handshake acknowledged")
             return
         if typ == "log":
             _remote_log(body.get("message", ""))

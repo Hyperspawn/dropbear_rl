@@ -1155,6 +1155,18 @@ def run_curses_interface() -> Optional[list[str]]:
                 _stop_all_remote_services()
                 _start_remote_mode()
 
+        def configure_nkn_remote_address(stdscr: "curses._CursesWindow") -> None:
+            nonlocal listener_error
+            value = prompt_for_config_name(stdscr, "Remote agent address (NKN):")
+            if not value:
+                return
+            listener_error = None
+            nkn_cfg = remote_settings.setdefault("nkn", {})
+            nkn_cfg["remote_address"] = value.strip()
+            remote_client.save_remote_config(remote_settings)
+            _refresh_remote_settings()
+            _ensure_nkn_mode_active()
+
         def build_args() -> list[str]:
             args = [f"--run={runs[selected]}"]
             if system_deps_choices[system_deps_idx] != "auto":
@@ -1252,6 +1264,7 @@ def run_curses_interface() -> Optional[list[str]]:
                 f"[r] Remote compute: {'ON' if remote_enabled else 'OFF'}",
                 f"[M] Remote mode: {remote_mode_label}",
                 remote_target_line,
+                f"[A] Remote agent addr: {remote_client.get_nkn_remote_address() or 'unknown'}",
             ]
             for idx, text in enumerate(options):
                 row = info_row + idx
@@ -1330,6 +1343,13 @@ def run_curses_interface() -> Optional[list[str]]:
                 _refresh_remote_settings()
             elif key == ord("M"):
                 _cycle_remote_mode()
+            elif key == ord("A"):
+                configure_nkn_remote_address(stdscr)
+                _refresh_remote_settings()
+                _ensure_nkn_mode_active()
+                if remote_settings.get("enabled") and remote_settings.get("mode") == "nkn":
+                    _stop_all_remote_services()
+                    _start_remote_mode()
             elif key == ord("N"):
                 configure_nkn_target_local(stdscr)
             elif key == ord("t"):
