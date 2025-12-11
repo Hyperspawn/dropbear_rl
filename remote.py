@@ -560,9 +560,35 @@ class NKNRemoteAgent:
                 send({"type": "start", "description": description})
                 try:
                     import importlib
+                    from remote_protocol_rl import MessageSequencer, create_train_start_message
 
                     train_mod = importlib.import_module("scripts.rsl_rl.train_remote")
                     argv = resolved_cmd[2:]
+
+                    # Extract controller address for an early train_start signal
+                    controller_addr = ""
+                    for idx, part in enumerate(argv):
+                        if part.startswith("--controller_address="):
+                            controller_addr = part.split("=", 1)[1]
+                            break
+                        if part == "--controller_address" and idx + 1 < len(argv):
+                            controller_addr = argv[idx + 1]
+                            break
+                    controller_addr = controller_addr.strip()
+                    if controller_addr and self.bridge:
+                        try:
+                            seq = MessageSequencer()
+                            start_msg = create_train_start_message(
+                                seq,
+                                task_config={},
+                                agent_config={},
+                                worker_address=self.bridge.address or "",
+                            )
+                            self.bridge.send_dm(controller_addr, start_msg.to_dict())
+                            self.display.record_outgoing(f"train_start → {controller_addr}")
+                        except Exception as exc:  # pragma: no cover
+                            self.display.record_log(f"[remote] Failed to send early train_start: {exc}")
+
                     train_mod.main(provided_sidecar=self.bridge, argv=argv)
                     exit_code = 0
                 except SystemExit as exc:  # capture argparse exits
