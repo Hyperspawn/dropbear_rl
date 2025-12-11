@@ -200,16 +200,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             config = json.load(f)
 
         nkn_cfg = config.get("nkn", {})
+
+        # CRITICAL: Use a DIFFERENT identifier than app.py to avoid address conflicts
+        # app.py uses "dropbear_app", we use "dropbear_train"
+        # This ensures two separate NKN addresses for the two processes
+        train_identifier = "dropbear_train"
+
         nkn_bridge = NKNSidecar(
             seed_hex=str(nkn_cfg.get("seed", "")),
-            identifier=str(nkn_cfg.get("identifier", "dropbear_app")),
+            identifier=train_identifier,
             num_subclients=max(1, int(nkn_cfg.get("num_subclients", 2))),
             seed_ws=str(nkn_cfg.get("seed_ws", "")),
         )
         nkn_bridge.start()
-        nkn_bridge.wait_ready(timeout=30.0)
+        if not nkn_bridge.wait_ready(timeout=30.0):
+            raise RuntimeError("[train.py] NKN bridge failed to become ready")
 
+        train_nkn_address = nkn_bridge.address
         print(f"[train.py] NKN bridge started in Isaac Sim environment")
+        print(f"[train.py] Train NKN address: {train_nkn_address}")
+        print(f"[train.py] Worker will send actions TO this address")
+
+        # Update config file with train.py's address so A100 knows where to send
+        nkn_cfg["train_address"] = train_nkn_address
+        config["nkn"] = nkn_cfg
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        print(f"[train.py] Updated config with train_address for A100")
 
         from controller_remote_env import ControllerRemoteEnvWrapper
         env = ControllerRemoteEnvWrapper(

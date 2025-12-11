@@ -106,11 +106,53 @@ def _build_remote_env(
     return stub_env, None
 
 
-def _load_controller_address() -> Optional[str]:
+def _load_controller_address(wait_for_train_address: bool = True) -> Optional[str]:
+    """Load controller address, preferring train_address over app_address.
+
+    train_address = train.py's NKN bridge (where to send actions)
+    app_address = app.py's NKN bridge (used for handshake only)
+
+    Args:
+        wait_for_train_address: If True, wait up to 10s for train_address to appear
+
+    Returns:
+        Controller NKN address or None
+    """
+    import time
+
+    # If we should wait for train_address, poll the config file
+    if wait_for_train_address:
+        print("[train_remote] Waiting for train.py to publish its NKN address...")
+        for attempt in range(20):  # 20 attempts * 0.5s = 10s max
+            cfg = _load_connection_config()
+            nkn_cfg = cfg.get("nkn", {})
+            train_addr = str(nkn_cfg.get("train_address") or "").strip()
+
+            if train_addr:
+                print(f"[train_remote] ✓ Found train_address: {train_addr}")
+                return train_addr
+
+            time.sleep(0.5)
+
+        print("[train_remote] ⚠ Timeout waiting for train_address, falling back to app_address")
+
+    # Load without waiting (or after timeout)
     cfg = _load_connection_config()
     nkn_cfg = cfg.get("nkn", {})
-    address = str(nkn_cfg.get("app_address") or "").strip()
-    return address or None
+
+    # Prefer train_address if available
+    train_addr = str(nkn_cfg.get("train_address") or "").strip()
+    if train_addr:
+        print(f"[train_remote] Using train_address: {train_addr}")
+        return train_addr
+
+    # Fallback to app_address
+    app_addr = str(nkn_cfg.get("app_address") or "").strip()
+    if app_addr:
+        print(f"[train_remote] Using app_address (fallback): {app_addr}")
+        return app_addr
+
+    return None
 
 
 # Create debug log file
