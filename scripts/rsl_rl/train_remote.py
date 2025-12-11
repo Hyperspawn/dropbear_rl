@@ -37,6 +37,7 @@ from dropbear_rl_lab.remote import build_stub_env, load_task_config, apply_hydra
 
 # Import RSL-RL directly (available on remote worker)
 from rsl_rl.runners import OnPolicyRunner
+from rsl_rl.modules import actor_critic as ac
 
 from remote_protocol_rl import (
     MessageSequencer,
@@ -48,6 +49,18 @@ from remote_protocol_rl import (
 from nkn_sidecar import NKNSidecar
 print("[train_remote] Running on IsaacLab-free tensor worker")
 print("[train_remote] This script never imports IsaacLab modules")
+
+# --- Safety patch: ensure actor std is always valid to avoid Normal() crashes ---
+_orig_update = ac.ActorCritic._update_distribution
+def _safe_update(self, obs):
+    _orig_update(self, obs)
+    if hasattr(self, "distribution"):
+        std = self.distribution.stddev
+        eps = torch.finfo(std.dtype).eps
+        std = torch.nan_to_num(std, nan=eps, posinf=eps, neginf=eps)
+        std = torch.clamp(torch.abs(std), min=eps)
+        self.distribution = torch.distributions.Normal(self.distribution.mean, std)
+ac.ActorCritic._update_distribution = _safe_update
 
 
 def dump_pickle_file(filename: str, data: object) -> None:
