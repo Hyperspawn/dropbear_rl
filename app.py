@@ -1709,9 +1709,9 @@ def main() -> int:
                 print("[i] ========================================")
 
                 # Remote-friendly defaults (can be overridden by CLI/Hydra)
-                default_remote_envs = 32
-                default_steps_per_env = 64
-                default_learning_epochs = 4
+                default_remote_envs = 16
+                default_steps_per_env = 256
+                default_learning_epochs = 8
                 default_mini_batches = 8
 
                 def _ensure_override(arg_list: List[str], prefix: str, value: object) -> None:

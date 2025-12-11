@@ -304,6 +304,25 @@ def main(provided_sidecar=None, argv=None):
     # Align agent/device with the selected env device (e.g., cuda:best_gpu)
     agent_dict["device"] = str(env.device)
 
+    # If running against a controller, bump default workload to better utilize A100,
+    # but allow explicit overrides to win.
+    def _set_default(path, value):
+        cur = agent_dict
+        *parents, leaf = path
+        for p in parents:
+            if p not in cur or not isinstance(cur[p], dict):
+                cur[p] = {}
+            cur = cur[p]
+        if leaf not in cur:
+            cur[leaf] = value
+
+    if controller_address:
+        _set_default(["num_steps_per_env"], 256)
+        _set_default(["num_mini_batches"], 8)
+        _set_default(["num_learning_epochs"], 8)
+        _set_default(["policy", "actor_hidden_dims"], [512, 512, 512])
+        _set_default(["policy", "critic_hidden_dims"], [512, 512, 512])
+
     # Create log directory
     experiment_name = args_cli.task or "dropbear_remote"
     experiment_name = experiment_name.lower().replace("-", "_")
@@ -321,7 +340,11 @@ def main(provided_sidecar=None, argv=None):
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.deterministic = False
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
+    try:
+        torch.set_float32_matmul_precision("medium")
+    except Exception:
+        pass
     # Ensure initial observations are available before constructing the runner
     try:
         env.reset()
