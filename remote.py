@@ -166,6 +166,38 @@ class _NullDisplay:
         pass
 
 
+class StdoutDisplay:
+    """Simple stdout display for non-curses, waterfall-style logging."""
+
+    def __init__(self) -> None:
+        self.address = ""
+        self.status = ""
+
+    def _print(self, message: str) -> None:
+        if message:
+            print(message)
+
+    def record_incoming(self, summary: str) -> None:  # pragma: no cover
+        self._print(f"[remote] Incoming: {summary}")
+
+    def record_outgoing(self, summary: str) -> None:  # pragma: no cover
+        self._print(f"[remote] Outgoing: {summary}")
+
+    def record_log(self, message: str) -> None:
+        self._print(message)
+
+    def set_address(self, address: str) -> None:  # pragma: no cover
+        self.address = address or ""
+        self._print(f"[remote] Address: {self.address}")
+
+    def set_status(self, status: str) -> None:  # pragma: no cover
+        self.status = status or ""
+        self._print(f"[remote] Status: {self.status}")
+
+    def stop(self) -> None:  # pragma: no cover
+        pass
+
+
 class RemoteCursesUI:
     LOG_LIMIT = 8
 
@@ -439,10 +471,20 @@ class NKNRemoteAgent:
             on_message=self._on_message,
             on_error=self._on_error,
         )
-        self.display = RemoteCursesUI() if enable_ui else _NullDisplay()
+        self.display = RemoteCursesUI() if enable_ui else StdoutDisplay()
         self._running = False
         self._handshake_lock = threading.Lock()
         self._handshake_sent = False
+
+    def _switch_to_stdout_display(self) -> None:
+        """Switch from curses UI to stdout waterfall logging."""
+        if isinstance(self.display, RemoteCursesUI):
+            try:
+                self.display.stop()
+            except Exception:
+                pass
+            self.display = StdoutDisplay()
+            self.display.record_log("[remote] Switched to stdout logging for training.")
 
     def _log(self, message: str) -> None:
         self.display.record_log(message)
@@ -562,6 +604,9 @@ class NKNRemoteAgent:
                     import importlib.machinery
                     import importlib.util
                     from remote_protocol_rl import MessageSequencer, create_train_start_message
+
+                    # Switch to stdout waterfall logging during training runs
+                    self._switch_to_stdout_display()
 
                     self.display.record_log("[remote] Inline train_remote starting...")
                     argv = resolved_cmd[2:]
