@@ -38,6 +38,16 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
+# DEBUG: Show what we received
+print("=" * 80, flush=True)
+print("[train.py] ARGUMENT PARSING DEBUG", flush=True)
+print("=" * 80, flush=True)
+print(f"[train.py] sys.argv = {sys.argv}", flush=True)
+print(f"[train.py] args_cli.remote_worker_address = {args_cli.remote_worker_address}", flush=True)
+print(f"[train.py] Type: {type(args_cli.remote_worker_address)}", flush=True)
+print(f"[train.py] Truthy? {bool(args_cli.remote_worker_address)}", flush=True)
+print("=" * 80, flush=True)
+
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
