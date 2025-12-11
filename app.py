@@ -1212,7 +1212,9 @@ def run_curses_interface() -> Optional[list[str]]:
             else:
                 nkn_target = remote_client.get_nkn_target()
                 nkn_remote_addr = remote_client.get_nkn_remote_address()
+                nkn_controller_addr = remote_client.get_nkn_app_address()
                 remote_target_line = f"[N] NKN target: {nkn_target or 'unset'}"
+                remote_status_entries.append(f"NKN controller addr: {nkn_controller_addr or 'pending...'}")
                 remote_status_entries.append(f"NKN remote addr: {nkn_remote_addr or 'unknown'}")
                 remote_status_entries.append(f"NKN status: {remote_client.get_nkn_status()}")
                 stats = remote_client.get_nkn_stats()
@@ -1237,9 +1239,14 @@ def run_curses_interface() -> Optional[list[str]]:
                 f"[M] Remote mode: {remote_mode_label}",
                 remote_target_line,
             ]
-            options.extend(remote_status_entries)
             for idx, text in enumerate(options):
                 row = info_row + idx
+                if row >= height - 3:
+                    break
+                stdscr.addstr(row, 5, text[: max(0, width - 8)])
+            status_row = info_row + len(options)
+            for idx, text in enumerate(remote_status_entries):
+                row = status_row + idx
                 if row >= height - 3:
                     break
                 stdscr.addstr(row, 5, text[: max(0, width - 8)])
@@ -1678,7 +1685,12 @@ def main() -> int:
                 if cfg.get("mode") == "nkn":
                     target = remote_client.get_nkn_target()
                     remote_addr = remote_client.get_nkn_remote_address()
+                    controller_addr = remote_client.get_nkn_app_address()
                     print(f"[i] NKN target: {target or 'unset'}")
+                    if controller_addr:
+                        print(f"[i] Controller NKN address: {controller_addr} (provide this to the remote agent)")
+                    else:
+                        print("[i] Controller NKN address pending sidecar readiness.")
                     if remote_addr:
                         print(f"[i] Remote agent reported address: {remote_addr}")
                     else:

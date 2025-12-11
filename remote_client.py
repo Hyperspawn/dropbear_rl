@@ -29,6 +29,7 @@ DEFAULT_REMOTE_CONFIG = {
         "identifier": "dropbear_app",
         "target": "",
         "remote_address": "",
+        "app_address": "",
         "num_subclients": 2,
         "seed_ws": "",
     },
@@ -284,6 +285,7 @@ class _NKNClient:
         self.ready_event = threading.Event()
         self.status_text = "starting"
         self.error_text: Optional[str] = None
+        self.app_address: str = ""
         self.sidecar.start()
         self.sidecar.wait_ready(timeout=30.0)
 
@@ -311,10 +313,26 @@ class _NKNClient:
             except Exception:
                 pass
 
+    def _publish_app_address(self, address: str) -> None:
+        if not address:
+            return
+        nkn_cfg = self.cfg.setdefault("nkn", {})
+        if nkn_cfg.get("app_address") == address:
+            self.app_address = address
+            return
+        nkn_cfg["app_address"] = address
+        self.app_address = address
+        try:
+            self.config_updater(self.cfg)
+        except Exception:
+            pass
+
     def _on_ready(self, address: str) -> None:
         self.ready_event.set()
         if address:
             self.status_text = f"ready {address}"
+            self.app_address = address
+            self._publish_app_address(address)
 
     def _on_status(self, message: str) -> None:
         if message:
@@ -474,6 +492,16 @@ def get_nkn_remote_address() -> str:
     cfg = _load_remote_config()
     nkn_cfg = cfg.get("nkn", {})
     return str(nkn_cfg.get("remote_address") or "")
+
+
+def get_nkn_app_address() -> str:
+    if _nkn_control and _nkn_control.client:
+        addr = _nkn_control.client.app_address
+        if addr:
+            return addr
+    cfg = _load_remote_config()
+    nkn_cfg = cfg.get("nkn", {})
+    return str(nkn_cfg.get("app_address") or "")
 
 
 def _dispatch_direct(cmd: Iterable[str], description: Optional[str]) -> subprocess.CompletedProcess:
