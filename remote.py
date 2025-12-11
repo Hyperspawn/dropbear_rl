@@ -435,6 +435,7 @@ class NKNRemoteAgent:
         self._handshake_sent = False
         self.train_address = ""
         self.train_address_event = threading.Event()
+        self.train_address_wait_timeout = 60.0
 
     def _log(self, message: str) -> None:
         self.display.record_log(message)
@@ -555,7 +556,7 @@ class NKNRemoteAgent:
             if not train_addr:
                 self._log("[remote] Waiting for train_address announcement before launching remote trainer...")
                 self.train_address_event.clear()
-                if self.train_address_event.wait(timeout=20.0):
+                if self.train_address_event.wait(timeout=self.train_address_wait_timeout):
                     train_addr = self.train_address
             if train_addr:
                 arg = f"--train-address={train_addr}"

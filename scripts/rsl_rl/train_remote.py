@@ -79,7 +79,7 @@ def _dump_run_configs(log_dir: Path, env_cfg: RemoteEnvCfg, agent_cfg: RemoteAge
     dump_pickle_file(params_dir / "agent.pkl", agent_cfg.to_dict())
 
 
-def _wait_for_train_address_from_config(timeout: float = 40.0, poll: float = 0.5) -> Optional[str]:
+def _wait_for_train_address_from_config(timeout: float = 80.0, poll: float = 0.5) -> Optional[str]:
     """Poll the shared config file until train_address is populated."""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -181,7 +181,7 @@ def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
         print(f"[train_remote] ✓ Our NKN bridge started: {bridge.address}")
 
         if not controller_address:
-            controller_address = _wait_for_train_address_from_config(timeout=40.0)
+            controller_address = _wait_for_train_address_from_config()
         if controller_address:
             print(f"[train_remote] ✓ Using controller address: {controller_address}")
         else:
