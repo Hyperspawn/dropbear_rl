@@ -31,7 +31,42 @@ class StubVecEnv:
         self.num_envs = num_envs
         self.num_obs = num_obs
         self.num_actions = num_actions
-        self.device = torch.device(device)
+
+        # Auto-select best available GPU or fall back to CPU
+        selected_device = device
+        if torch.cuda.is_available():
+            # Find the most capable GPU (highest compute capability)
+            best_gpu = None
+            best_capability = (0, 0)
+
+            for i in range(torch.cuda.device_count()):
+                capability = torch.cuda.get_device_capability(i)
+                gpu_name = torch.cuda.get_device_name(i)
+                print(f"[stub_env] GPU {i}: {gpu_name} (compute {capability[0]}.{capability[1]})")
+
+                if capability > best_capability:
+                    best_capability = capability
+                    best_gpu = i
+
+            if best_gpu is not None and best_capability >= (7, 0):
+                selected_device = f"cuda:{best_gpu}"
+                gpu_name = torch.cuda.get_device_name(best_gpu)
+                print(f"[stub_env] Selected GPU {best_gpu}: {gpu_name} (compute {best_capability[0]}.{best_capability[1]})")
+            else:
+                print(f"[stub_env] No compatible GPU found (need compute >= 7.0), using CPU")
+                selected_device = "cpu"
+        else:
+            print("[stub_env] CUDA not available, using CPU")
+            selected_device = "cpu"
+
+        try:
+            self.device = torch.device(selected_device)
+            # Test device
+            test_tensor = torch.zeros(1, device=self.device)
+            del test_tensor
+        except RuntimeError as e:
+            print(f"[stub_env] Device {selected_device} error: {e}, falling back to CPU")
+            self.device = torch.device("cpu")
 
         # Define observation and action spaces
         self.observation_space = gym.spaces.Box(
@@ -48,42 +83,45 @@ class StubVecEnv:
         )
 
         # Initialize stub state
-        self._obs = torch.zeros(num_envs, num_obs, device=self.device, dtype=torch.float32)
+        # RSL-RL expects observations as a dict with a "policy" key
+        self._obs_dict = {
+            "policy": torch.zeros(num_envs, num_obs, device=self.device, dtype=torch.float32)
+        }
         self._rewards = torch.zeros(num_envs, device=self.device, dtype=torch.float32)
         self._dones = torch.zeros(num_envs, device=self.device, dtype=torch.bool)
         self._info = {}
 
-    def reset(self) -> Tuple[torch.Tensor, Dict[str, Any]]:
+    def reset(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         """Reset the environment.
 
         Returns:
-            Tuple of (observations, info_dict)
+            Tuple of (observations_dict, info_dict)
         """
-        self._obs.zero_()
+        self._obs_dict["policy"].zero_()
         self._dones.zero_()
-        return self._obs, {}
+        return self._obs_dict, {}
 
-    def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, Any]]:
+    def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Execute one step in the environment.
 
         Args:
             actions: Action tensor of shape (num_envs, num_actions)
 
         Returns:
-            Tuple of (observations, rewards, dones, info_dict)
+            Tuple of (observations_dict, rewards, dones, info_dict)
         """
         # In a real remote setup, this would send actions to controller
         # and receive back observations, rewards, dones
         # For now, return stub data
-        return self._obs, self._rewards, self._dones, self._info
+        return self._obs_dict, self._rewards, self._dones, self._info
 
-    def get_observations(self) -> torch.Tensor:
+    def get_observations(self) -> Dict[str, torch.Tensor]:
         """Get current observations.
 
         Returns:
-            Observation tensor of shape (num_envs, num_obs)
+            Dictionary with "policy" key containing observation tensor
         """
-        return self._obs
+        return self._obs_dict
 
     def close(self) -> None:
         """Clean up environment resources."""
