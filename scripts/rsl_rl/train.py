@@ -128,6 +128,13 @@ torch.backends.cudnn.benchmark = False
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     """Train with RSL-RL agent."""
+    # DEBUG: Check if remote_worker_address is still accessible inside main()
+    print("=" * 80, flush=True)
+    print("[train.py] INSIDE main() - Checking remote_worker_address", flush=True)
+    print(f"[train.py] args_cli.remote_worker_address = {args_cli.remote_worker_address}", flush=True)
+    print(f"[train.py] Truthy? {bool(args_cli.remote_worker_address)}", flush=True)
+    print("=" * 80, flush=True)
+
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
