@@ -314,6 +314,8 @@ def main(provided_sidecar=None, argv=None):
         agent_dict.setdefault("policy", {})
         agent_dict["policy"]["actor_hidden_dims"] = [768, 768, 768]
         agent_dict["policy"]["critic_hidden_dims"] = [768, 768, 768]
+        # Keep a conservative learning rate to reduce instability
+        agent_dict["algorithm"]["learning_rate"] = 3e-4
 
     # Create log directory
     experiment_name = args_cli.task or "dropbear_remote"
