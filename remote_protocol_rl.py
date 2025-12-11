@@ -132,15 +132,15 @@ class TensorSerializer:
     """Serialize/deserialize PyTorch tensors for network transport."""
 
     @staticmethod
-    def serialize_tensor(tensor: torch.Tensor, compress: bool = True) -> bytes:
-        """Convert tensor to bytes.
+    def serialize_tensor(tensor: torch.Tensor, compress: bool = True) -> str:
+        """Convert tensor to a hex string safe for JSON transport.
 
         Args:
             tensor: PyTorch tensor
             compress: Whether to apply zlib compression
 
         Returns:
-            Serialized bytes
+            Hex-encoded serialized bytes (JSON safe)
         """
         buffer = io.BytesIO()
         torch.save(tensor, buffer)
@@ -149,19 +149,21 @@ class TensorSerializer:
         if compress:
             data = zlib.compress(data, level=6)
 
-        return data
+        return data.hex()
 
     @staticmethod
-    def deserialize_tensor(data: bytes, decompress: bool = True) -> torch.Tensor:
-        """Reconstruct tensor from bytes.
+    def deserialize_tensor(data: Any, decompress: bool = True) -> torch.Tensor:
+        """Reconstruct tensor from hex string or bytes.
 
         Args:
-            data: Serialized bytes
+            data: Serialized tensor (hex string or raw bytes)
             decompress: Whether to decompress first
 
         Returns:
             PyTorch tensor
         """
+        if isinstance(data, str):
+            data = bytes.fromhex(data)
         if decompress:
             data = zlib.decompress(data)
 
@@ -170,14 +172,14 @@ class TensorSerializer:
         return tensor
 
     @staticmethod
-    def serialize_obs_dict(obs_dict: Dict[str, torch.Tensor]) -> Dict[str, bytes]:
+    def serialize_obs_dict(obs_dict: Dict[str, torch.Tensor]) -> Dict[str, str]:
         """Serialize observation dictionary.
 
         Args:
             obs_dict: Dict of observation tensors (e.g., {"policy": tensor})
 
         Returns:
-            Dict with same keys but serialized tensor values
+            Dict with same keys but hex-encoded tensor values
         """
         return {
             key: TensorSerializer.serialize_tensor(tensor)
@@ -185,11 +187,11 @@ class TensorSerializer:
         }
 
     @staticmethod
-    def deserialize_obs_dict(serialized: Dict[str, bytes]) -> Dict[str, torch.Tensor]:
+    def deserialize_obs_dict(serialized: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """Deserialize observation dictionary.
 
         Args:
-            serialized: Dict with serialized tensor values
+            serialized: Dict with serialized tensor values (hex strings)
 
         Returns:
             Dict of PyTorch tensors

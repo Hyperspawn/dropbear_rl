@@ -144,6 +144,10 @@ class RemoteVecEnv:
     def _handle_network_message(self, src: str, body: Dict[str, Any]) -> None:
         """Handle incoming network messages."""
         try:
+            if not isinstance(body, dict) or "msg_type" not in body:
+                if self._original_on_message:
+                    self._original_on_message(src, body)
+                return
             # Ignore self-loop messages (e.g., our own heartbeats)
             if src and self.nkn_bridge and src == getattr(self.nkn_bridge, "address", ""):
                 return
