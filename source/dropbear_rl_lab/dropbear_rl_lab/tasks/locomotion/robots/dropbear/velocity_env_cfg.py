@@ -133,7 +133,14 @@ class EventCfg:
         mode="reset",
         params={
             # Keep respawn poses tight so robots reappear where expected after a fall
-            "pose_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "yaw": (-0.1, 0.1)},
+            "pose_range": {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "z": (1.0, 1.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (-0.1, 0.1),
+            },
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
