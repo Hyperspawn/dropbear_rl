@@ -563,6 +563,7 @@ class NKNRemoteAgent:
                     import importlib.util
                     from remote_protocol_rl import MessageSequencer, create_train_start_message
 
+                    self.display.record_log("[remote] Inline train_remote starting...")
                     argv = resolved_cmd[2:]
 
                     # Extract controller address for an early train_start signal
@@ -606,6 +607,8 @@ class NKNRemoteAgent:
                     exit_code = 1
                     send({"type": "error", "message": f"Inline train_remote failed: {exc}"})
                     self.display.record_log(f"[remote] Inline train_remote failed: {exc}")
+                else:
+                    self.display.record_log("[remote] Inline train_remote completed.")
                 send({"type": "exit", "code": exit_code})
         except Exception as exc:
             inline_handled = False
