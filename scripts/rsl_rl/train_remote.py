@@ -110,6 +110,7 @@ def main():
         or os.environ.get("DROPBEAR_CONTROLLER_NKN_ADDRESS")
         or ""
     )
+    controller_address = controller_address.strip().rstrip("\\/")
 
     # Build or reuse NKN sidecar for worker dataplane
     nkn_seed = (

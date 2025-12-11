@@ -154,6 +154,11 @@ class RemoteVecEnv:
             if processed and processed.msg_type == MSG_OBS_BATCH:
                 # Queue observation message
                 self.obs_queue.put(processed, block=False)
+                try:
+                    step_id = processed.payload.get("step_id")
+                    print(f"[remote_env] Received obs batch for step {step_id}")
+                except Exception:
+                    pass
 
             if processed and processed.msg_type == MSG_HEARTBEAT:
                 return
