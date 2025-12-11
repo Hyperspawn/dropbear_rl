@@ -1723,8 +1723,15 @@ def main() -> int:
                 heavy_hidden_dims = "[512,512,512]"
 
                 def _force_override(arg_list: List[str], key: str, value: object) -> None:
-                    """Force an override by appending at the end (Hydra last-one-wins)."""
-                    arg_list.append(f"{key}{value}")
+                    """Force an override by appending at the end (Hydra last-one-wins).
+
+                    If the key is a Hydra-style "+foo.bar=" we upgrade to "++" to avoid
+                    duplicate-key errors when the user already provided one.
+                    """
+                    if key.startswith("+"):
+                        arg_list.append(f"++{key.lstrip('+')}{value}")
+                    else:
+                        arg_list.append(f"{key}{value}")
 
                 # First, dispatch train_remote.py to A100 worker (non-blocking)
                 remote_script_rel = Path("scripts") / "rsl_rl" / "train_remote.py"
