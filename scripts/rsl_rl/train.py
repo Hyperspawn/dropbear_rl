@@ -142,7 +142,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # create consistent logging directories
     log_root, log_dir = build_log_paths(agent_cfg.experiment_name, agent_cfg.run_name)
     ensure_log_directory(log_root, log_dir)
-    print(f"[INFO] Logging experiment in directory: {log_root}")
+    log_root_path = str(log_root)
+    print(f"[INFO] Logging experiment in directory: {log_root_path}")
     print(f"Exact experiment name requested from command line: {log_dir.name}")
 
     # create isaac environment
