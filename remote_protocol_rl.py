@@ -10,6 +10,7 @@ This module handles:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import time
@@ -133,14 +134,14 @@ class TensorSerializer:
 
     @staticmethod
     def serialize_tensor(tensor: torch.Tensor, compress: bool = True) -> str:
-        """Convert tensor to a hex string safe for JSON transport.
+        """Convert tensor to a base64 string safe for JSON transport.
 
         Args:
             tensor: PyTorch tensor
             compress: Whether to apply zlib compression
 
         Returns:
-            Hex-encoded serialized bytes (JSON safe)
+            Base64-encoded serialized bytes (JSON safe)
         """
         buffer = io.BytesIO()
         torch.save(tensor, buffer)
@@ -149,21 +150,21 @@ class TensorSerializer:
         if compress:
             data = zlib.compress(data, level=6)
 
-        return data.hex()
+        return base64.b64encode(data).decode("ascii")
 
     @staticmethod
     def deserialize_tensor(data: Any, decompress: bool = True) -> torch.Tensor:
-        """Reconstruct tensor from hex string or bytes.
+        """Reconstruct tensor from base64 string or bytes.
 
         Args:
-            data: Serialized tensor (hex string or raw bytes)
+            data: Serialized tensor (base64 string or raw bytes)
             decompress: Whether to decompress first
 
         Returns:
             PyTorch tensor
         """
         if isinstance(data, str):
-            data = bytes.fromhex(data)
+            data = base64.b64decode(data.encode("ascii"))
         if decompress:
             data = zlib.decompress(data)
 
