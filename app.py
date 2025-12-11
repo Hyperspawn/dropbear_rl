@@ -1656,7 +1656,6 @@ def main() -> int:
     # ---- run something in Isaac Lab / Dropbear scripts ----
     run_env = prepend_path(dict(os.environ), venv_bin_dir(env_dir))
     run_env = add_dropbear_pythonpath(run_env)
-    run_env.setdefault("HYDRA_FULL_ERROR", "1")
 
     if args.run != "none":
 
@@ -1717,9 +1716,9 @@ def main() -> int:
                     heavy_mini_batches = 8
                 else:
                     # When rendering, keep env count modest to avoid IsaacSim overload.
-                    heavy_remote_envs = 4
-                    heavy_steps_per_env = 64
-                    heavy_learning_epochs = 4
+                    heavy_remote_envs = 8
+                    heavy_steps_per_env = 128
+                    heavy_learning_epochs = 6
                     heavy_mini_batches = 4
                 heavy_hidden_dims = "[512,512,512]"
 

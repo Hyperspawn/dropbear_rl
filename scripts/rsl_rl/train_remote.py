@@ -304,8 +304,8 @@ def main(provided_sidecar=None, argv=None):
     # Align agent/device with the selected env device (e.g., cuda:best_gpu)
     agent_dict["device"] = str(env.device)
 
-    # If running against a controller, push a heavier workload to use the A100,
-    # but keep it sane for visualization/default headless runs.
+    # If running against a controller, push a heavier workload to use the A100.
+    # These are intentionally high, but not extreme, and keep shapes consistent.
     if controller_address:
         agent_dict["num_steps_per_env"] = 256
         agent_dict["num_mini_batches"] = 8
