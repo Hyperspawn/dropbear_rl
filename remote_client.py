@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 REMOTE_CONFIG_FILE = PROJECT_ROOT / "isaaclab_remote_connection.json"
 DEFAULT_REMOTE_CONFIG = {
     "enabled": False,
-    "mode": "reverse",
+    "mode": "nkn",
     "host": "127.0.0.1",
     "port": 5003,
     "reverse_port": 5004,
