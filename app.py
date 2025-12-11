@@ -1614,10 +1614,14 @@ def main() -> int:
 
     # ---- optional system deps ----
     # Needed by Isaac Lab optional deps (e.g., robomimic); also ensure git exists for clone.
+    # Run at most once unless --force is passed.
     if sysname == "Linux":
         want = args.system_deps
-        pkgs = ["cmake", "build-essential", "git"]
-        apt_install_if_requested(pkgs, mode=want)
+        marker_apt = ".isaaclab_apt_ok"
+        if want != "off" and (args.force or not has_marker(env_dir, marker_apt)):
+            pkgs = ["cmake", "build-essential", "git"]
+            apt_install_if_requested(pkgs, mode=want)
+            write_marker(env_dir, marker_apt)
 
     # ---- pip bootstrap ----
     marker_bootstrap = ".isaaclab_bootstrap_ok"
@@ -1897,6 +1901,31 @@ def main() -> int:
 
         elif args.run == "dropbear_play":
             script_path = str(PROJECT_ROOT / "scripts" / "rsl_rl" / "play.py")
+            # Strip conflicting task overrides from user args and translate Hydra-style
+            # hidden-dim overrides into the play.py flags.
+            actor_override: Optional[str] = None
+            critic_override: Optional[str] = None
+
+            def _clean_dims(raw: str) -> str:
+                # Accept forms like "[768,768,768]" or "768,768,768"
+                cleaned = raw.strip().strip("[]")
+                return cleaned.replace(" ", "")
+
+            filtered_unknown: list[str] = []
+            for u in unknown:
+                if u.startswith("--dropbear_play_task") or u.startswith("--task=") or u == "--task":
+                    continue
+                if u.startswith("++agent_cfg.policy.actor_hidden_dims=") or u.startswith(
+                    "+agent_cfg.policy.actor_hidden_dims="
+                ):
+                    actor_override = _clean_dims(u.split("=", 1)[1])
+                    continue
+                if u.startswith("++agent_cfg.policy.critic_hidden_dims=") or u.startswith(
+                    "+agent_cfg.policy.critic_hidden_dims="
+                ):
+                    critic_override = _clean_dims(u.split("=", 1)[1])
+                    continue
+                filtered_unknown.append(u)
             play_args: List[str] = [f"--task={args.dropbear_play_task}"]
             if args.dropbear_video or args.dropbear_play_video:
                 play_args.append("--video")
@@ -1904,7 +1933,11 @@ def main() -> int:
                 play_args.append(f"--video_length={args.dropbear_video_length}")
             if args.headless and "--headless" not in unknown:
                 play_args.append("--headless")
-            play_args += unknown
+            if actor_override:
+                play_args.append(f"--actor_hidden_dims={actor_override}")
+            if critic_override:
+                play_args.append(f"--critic_hidden_dims={critic_override}")
+            play_args += filtered_unknown
             cmd = base_cmd + [script_path] + play_args
             run_cmd(cmd, cwd=repo_dir, env=run_env)
 

@@ -28,6 +28,19 @@ parser.add_argument(
     action="store_true",
     help="Use the pre-trained checkpoint from Nucleus.",
 )
+# Optional overrides to match checkpoint architecture
+parser.add_argument(
+    "--actor_hidden_dims",
+    type=str,
+    default=None,
+    help="Comma-separated hidden sizes for actor MLP (e.g., 768,768,768).",
+)
+parser.add_argument(
+    "--critic_hidden_dims",
+    type=str,
+    default=None,
+    help="Comma-separated hidden sizes for critic MLP (e.g., 768,768,768).",
+)
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -74,6 +87,21 @@ def main():
         entry_point_key="play_env_cfg_entry_point",
     )
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    # Allow overriding hidden dimensions to match checkpoints trained with custom widths.
+    def _parse_dims(raw: str | None) -> list[int] | None:
+        if not raw:
+            return None
+        try:
+            return [int(x.strip()) for x in raw.split(",") if x.strip()]
+        except Exception:
+            return None
+
+    actor_dims = _parse_dims(args_cli.actor_hidden_dims)
+    critic_dims = _parse_dims(args_cli.critic_hidden_dims)
+    if actor_dims:
+        agent_cfg.policy.actor_hidden_dims = actor_dims
+    if critic_dims:
+        agent_cfg.policy.critic_hidden_dims = critic_dims
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -132,15 +160,15 @@ def main():
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(
-        policy_nn, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
-    )
+    normalizer = getattr(ppo_runner, "obs_normalizer", None)
+    export_policy_as_jit(policy_nn, normalizer, path=export_model_dir, filename="policy.pt")
+    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
 
     # reset environment
-    obs, _ = env.get_observations()
+    # RslRlVecEnvWrapper.get_observations returns a TensorDict only.
+    obs = env.get_observations()
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
