@@ -235,7 +235,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             MSG_CHECKPOINT_REQUEST_RETRY,
             MSG_CHECKPOINT_START,
         )
-        from remote_protocol_rl import MessageEnvelope, MessageSequencer, MSG_TRAIN_DONE, MSG_METRICS, MSG_TRAIN_START
+        from remote_protocol_rl import MessageEnvelope, MessageSequencer, MSG_TRAIN_DONE, MSG_METRICS, MSG_TRAIN_START, MSG_HEARTBEAT
 
         checkpoint_receiver = CheckpointReceiver(
             nkn_bridge=nkn_bridge,
@@ -244,6 +244,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         )
 
         stop_event = threading.Event()
+        worker_ready_event = threading.Event()
         original_on_message = getattr(nkn_bridge, "on_message", None)
 
         def nkn_message_handler(src: str, body: dict):
@@ -268,6 +269,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 return
             if msg_type == MSG_TRAIN_START:
                 print("[train.py] Remote worker acknowledged controller; training start received.")
+                worker_ready_event.set()
+                return
+            if msg_type == MSG_HEARTBEAT:
+                worker_ready_event.set()
                 return
             if msg_type == MSG_METRICS:
                 iteration = envelope.payload.get("iteration")
@@ -312,6 +317,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         def controller_loop() -> None:
             steps = 0
             try:
+                print("[train.py] Waiting for remote worker ready signal...")
+                if not worker_ready_event.wait(timeout=45.0):
+                    raise RuntimeError("Remote worker did not signal readiness (train_start/heartbeat).")
+                print("[train.py] Remote worker ready; starting simulation loop.")
                 env.reset()
                 while not stop_event.is_set():
                     try:
