@@ -166,6 +166,9 @@ def main():
                 "num_steps_per_env": self.num_steps_per_env,
                 "max_iterations": self.max_iterations,
                 "empirical_normalization": self.empirical_normalization,
+                # Required by RSL-RL OnPolicyRunner
+                "obs_groups": {},  # Empty dict for stub environment
+                "privileged_obs_groups": {},  # Empty dict for stub environment
             }
 
     agent_cfg = MinimalPPOConfig()
