@@ -112,7 +112,16 @@ class StubVecEnv:
         """
         self._obs_dict["policy"].zero_()
         self._dones.zero_()
-        return self._obs_dict, {}
+
+        # Wrap obs_dict with ObsDict for .to() support
+        class ObsDict(dict):
+            """Dict subclass that supports .to() method for RSL-RL compatibility."""
+            def to(self, device):
+                """Move all tensors in the dict to the specified device."""
+                return ObsDict({k: v.to(device) if isinstance(v, torch.Tensor) else v
+                               for k, v in self.items()})
+
+        return ObsDict(self._obs_dict), {}
 
     def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Execute one step in the environment.
@@ -126,7 +135,16 @@ class StubVecEnv:
         # In a real remote setup, this would send actions to controller
         # and receive back observations, rewards, dones
         # For now, return stub data
-        return self._obs_dict, self._rewards, self._dones, self._info
+
+        # Wrap obs_dict with ObsDict for .to() support
+        class ObsDict(dict):
+            """Dict subclass that supports .to() method for RSL-RL compatibility."""
+            def to(self, device):
+                """Move all tensors in the dict to the specified device."""
+                return ObsDict({k: v.to(device) if isinstance(v, torch.Tensor) else v
+                               for k, v in self.items()})
+
+        return ObsDict(self._obs_dict), self._rewards, self._dones, self._info
 
     def get_observations(self) -> Dict[str, torch.Tensor]:
         """Get current observations.

@@ -180,8 +180,16 @@ class RemoteVecEnv:
         self._current_obs = obs_dict
         self.step_counter = payload["step_id"]
 
+        # Wrap obs_dict with ObsDict for .to() support
+        class ObsDict(dict):
+            """Dict subclass that supports .to() method for RSL-RL compatibility."""
+            def to(self, device):
+                """Move all tensors in the dict to the specified device."""
+                return ObsDict({k: v.to(device) if isinstance(v, torch.Tensor) else v
+                               for k, v in self.items()})
+
         print(f"[remote_env] Received initial obs for step {self.step_counter}")
-        return obs_dict, {}
+        return ObsDict(obs_dict), {}
 
     def step(
         self, actions: torch.Tensor
@@ -231,7 +239,15 @@ class RemoteVecEnv:
         self._current_dones = dones
         self.step_counter = payload["step_id"]
 
-        return obs_dict, rewards, dones, {}
+        # Wrap obs_dict with ObsDict for .to() support
+        class ObsDict(dict):
+            """Dict subclass that supports .to() method for RSL-RL compatibility."""
+            def to(self, device):
+                """Move all tensors in the dict to the specified device."""
+                return ObsDict({k: v.to(device) if isinstance(v, torch.Tensor) else v
+                               for k, v in self.items()})
+
+        return ObsDict(obs_dict), rewards, dones, {}
 
     def get_observations(self) -> Dict[str, torch.Tensor]:
         """Get current observations.
