@@ -150,7 +150,8 @@ class EventCfg:
         mode="reset",
         params={
             "position_range": (1.0, 1.0),
-            "velocity_range": (-1.0, 1.0),
+            # Zero joint velocities on reset to avoid carry-over impulses
+            "velocity_range": (0.0, 0.0),
         },
     )
 
@@ -405,7 +406,8 @@ class DropbearVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 4
+        # Slow down control rate to reduce violent impulses
+        self.decimation = 8
         # Slightly longer episodes to allow recovery attempts but still short for fast resets
         self.episode_length_s = 8.0
         # simulation settings
