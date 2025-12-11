@@ -283,7 +283,8 @@ def main():
         runner.learn(num_learning_iterations=1, init_at_random_ep_len=(iteration == 0))
 
         # Check if we should save checkpoint
-        current_it = runner.tot_iter
+        #current_it = runner.tot_iter
+        current_it = iteration + 1
         if current_it % save_interval == 0:
             # Save checkpoint locally
             checkpoint_path = os.path.join(log_dir, f"model_{current_it}.pt")
