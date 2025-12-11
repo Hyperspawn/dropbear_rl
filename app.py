@@ -1724,7 +1724,6 @@ def main() -> int:
                 if "--headless" not in remote_train_args:
                     remote_train_args.append("--headless")
 
-                remote_cmd = ["python", str(remote_script_rel)] + remote_train_args
                 cfg = remote_client.get_remote_config()
                 target = ""
                 remote_addr = ""
@@ -1744,6 +1743,10 @@ def main() -> int:
                         print(f"[i] A100 worker address: {remote_addr}")
                     else:
                         print("[i] Remote agent address pending handshake.")
+                if controller_addr:
+                    remote_train_args.append(f"--app-address={controller_addr}")
+
+                remote_cmd = ["python", str(remote_script_rel)] + remote_train_args
 
                 print("[i] Step 1: Dispatching train_remote.py to A100 worker...")
                 print(f"[i] A100 will run: {' '.join(remote_cmd)}")
