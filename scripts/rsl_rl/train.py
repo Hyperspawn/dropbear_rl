@@ -222,6 +222,47 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             timeout=30.0,
         )
         print("[train.py] Environment wrapped - simulation local, policy remote!")
+
+        # Setup checkpoint receiver to get trained models from A100
+        from checkpoint_transfer_protocol import CheckpointReceiver, MSG_CHECKPOINT_START, MSG_CHECKPOINT_CHUNK, MSG_CHECKPOINT_REQUEST_RETRY, MSG_CHECKPOINT_ACK
+        from remote_protocol_rl import MessageSequencer, MessageEnvelope
+
+        checkpoint_receiver = CheckpointReceiver(
+            nkn_bridge=nkn_bridge,
+            sequencer=MessageSequencer(),
+            save_dir=Path(log_root_path),
+        )
+
+        # Register message handler for checkpoints
+        original_on_message = nkn_bridge._on_message
+
+        def checkpoint_message_handler(src: str, body: dict):
+            """Handle checkpoint transfer messages."""
+            try:
+                envelope = MessageEnvelope.from_dict(body)
+                msg_type = envelope.msg_type
+
+                if msg_type == MSG_CHECKPOINT_START:
+                    checkpoint_receiver.handle_checkpoint_start(src, envelope.payload)
+                elif msg_type == MSG_CHECKPOINT_CHUNK:
+                    checkpoint_receiver.handle_checkpoint_chunk(src, envelope.payload)
+                elif msg_type == MSG_CHECKPOINT_REQUEST_RETRY:
+                    # Forward to ControllerRemoteEnvWrapper if needed
+                    pass
+                elif msg_type == MSG_CHECKPOINT_ACK:
+                    # A100 acknowledged receipt
+                    pass
+                else:
+                    # Pass through to original handler
+                    if original_on_message:
+                        original_on_message(src, body)
+            except Exception as e:
+                print(f"[train.py] Error handling message: {e}")
+                if original_on_message:
+                    original_on_message(src, body)
+
+        nkn_bridge._on_message = checkpoint_message_handler
+        print("[train.py] Checkpoint receiver enabled - will save models from A100")
     else:
         print("[train.py] Local mode: simulation and policy both on RTX")
 
@@ -252,6 +293,49 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # close the simulator
     env.close()
+
+    # If remote mode, wait for final checkpoint and auto-play
+    if args_cli.remote_worker_address:
+        print("[train.py] ========================================")
+        print("[train.py] Training completed!")
+        print("[train.py] Waiting for final checkpoint from A100...")
+        print("[train.py] ========================================")
+
+        # Wait a bit for final checkpoint transfer to complete
+        import time
+        time.sleep(5)
+
+        # Find the latest checkpoint
+        checkpoint_dirs = list(Path(log_root_path).glob("iteration_*"))
+        if checkpoint_dirs:
+            latest_checkpoint_dir = max(checkpoint_dirs, key=lambda p: p.stat().st_mtime)
+            checkpoint_files = list(latest_checkpoint_dir.glob("model_*.pt"))
+
+            if checkpoint_files:
+                latest_checkpoint = max(checkpoint_files, key=lambda p: p.stat().st_mtime)
+                print(f"[train.py] Latest checkpoint: {latest_checkpoint}")
+                print(f"[train.py] Ready to visualize!")
+                print(f"[train.py]")
+                print(f"[train.py] To visualize the trained policy, run:")
+                print(f"[train.py]   python3 app.py")
+                print(f"[train.py]   Then select dropbear_play (with remote mode OFF)")
+                print(f"[train.py] Or run directly:")
+                print(f"[train.py]   ./isaaclab.sh -p scripts/rsl_rl/play.py \\")
+                print(f"[train.py]       --task {args_cli.task} \\")
+                print(f"[train.py]       --checkpoint {latest_checkpoint}")
+            else:
+                print(f"[train.py] No checkpoint files found in {latest_checkpoint_dir}")
+        else:
+            print(f"[train.py] No checkpoint directories found in {log_root_path}")
+
+        # Keep window open so user can see the messages
+        print(f"[train.py]")
+        print(f"[train.py] Press Ctrl+C to exit or close this window")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print(f"[train.py] Exiting...")
 
 
 if __name__ == "__main__":

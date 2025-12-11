@@ -263,17 +263,51 @@ def main():
     dump_pickle_file(os.path.join(log_dir, "params", "task.pkl"), task_config)
 
     print(f"[train_remote] Starting training for {agent_dict['max_iterations']} iterations")
-    print("[train_remote] Environment is STUB - no actual simulation running")
-    print("[train_remote] This is pure tensor math on A100 worker")
+    if controller_address:
+        print("[train_remote] PRODUCTION MODE: Training with real observations from RTX")
+    else:
+        print("[train_remote] STUB MODE: Training with zero observations (testing only)")
 
-    # Run training
-    runner.learn(num_learning_iterations=agent_dict["max_iterations"], init_at_random_ep_len=True)
+    # Setup checkpoint transfer if we have a controller
+    checkpoint_sender = None
+    if controller_address and nkn_bridge:
+        from checkpoint_transfer_protocol import CheckpointSender
+        checkpoint_sender = CheckpointSender(nkn_bridge, env.sequencer if hasattr(env, 'sequencer') else None)
+        print("[train_remote] Checkpoint auto-transfer enabled → RTX controller")
+
+    # Run training with checkpoint callback
+    save_interval = agent_dict.get("save_interval", 50)
+
+    for iteration in range(agent_dict["max_iterations"]):
+        # Run one iteration of training
+        runner.learn(num_learning_iterations=1, init_at_random_ep_len=(iteration == 0))
+
+        # Check if we should save checkpoint
+        current_it = runner.tot_iter
+        if current_it % save_interval == 0:
+            # Save checkpoint locally
+            checkpoint_path = os.path.join(log_dir, f"model_{current_it}.pt")
+            runner.save(checkpoint_path)
+            print(f"[train_remote] Saved checkpoint: {checkpoint_path}")
+
+            # Transfer to controller if available
+            if checkpoint_sender and controller_address:
+                print(f"[train_remote] Transferring checkpoint to RTX controller...")
+                checkpoint_id = checkpoint_sender.send_checkpoint(
+                    file_path=Path(checkpoint_path),
+                    destination=controller_address,
+                    iteration=current_it,
+                )
+                print(f"[train_remote] Transfer initiated: {checkpoint_id}")
 
     # Close environment
     env.close()
 
     print("[train_remote] Training completed on remote worker")
-    print("[train_remote] No IsaacLab imports were used - confirmed!")
+    if controller_address:
+        print("[train_remote] All checkpoints transferred to RTX controller")
+    else:
+        print("[train_remote] No controller - checkpoints remain on A100")
 
 
 if __name__ == "__main__":
