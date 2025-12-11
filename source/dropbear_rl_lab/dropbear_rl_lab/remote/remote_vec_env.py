@@ -154,6 +154,7 @@ class RemoteVecEnv:
                 if expected and not src.startswith(expected):
                     print(f"[remote_env] Dropping obs from {src}; expected {expected}")
                     return
+                print(f"[remote_env] Received obs message from {src}")
                 self.obs_queue.put(processed, block=False)
                 try:
                     step_id = processed.payload.get("step_id")

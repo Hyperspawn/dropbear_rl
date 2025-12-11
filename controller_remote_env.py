@@ -177,6 +177,7 @@ class ControllerRemoteEnvWrapper:
 
         # Send via NKN
         try:
+            print(f"[controller_env] Sending obs for step {self.step_counter} to {self.worker_address}")
             self.nkn_bridge.send_dm(self.worker_address, msg.to_dict())
             print(f"[controller_env] Sent observations for step {self.step_counter}")
             self.step_counter += 1
