@@ -148,11 +148,9 @@ class ControllerRemoteEnvWrapper:
                     f"[controller_env] Timeout waiting for actions at step {self.step_counter}"
                 )
 
-            # Deserialize actions
+            # Deserialize actions (base64-encoded)
             from remote_protocol_rl import TensorSerializer
-            actions_bytes = bytes.fromhex(action_msg.payload["actions"])
-            actions = TensorSerializer.deserialize_tensor(actions_bytes)
-            actions = actions.to(self.device)
+            actions = TensorSerializer.deserialize_tensor(action_msg.payload["actions"]).to(self.device)
 
             print(f"[controller_env] Received actions, executing step {self.step_counter}")
 
