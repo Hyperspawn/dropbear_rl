@@ -824,7 +824,7 @@ def run_curses_interface() -> Optional[list[str]]:
         stdscr.addstr(2, 0, "Leave blank to cancel.")
         stdscr.refresh()
         try:
-            raw = stdscr.getstr(1, 0, 64)
+            raw = stdscr.getstr(1, 0, 256)
             name = raw.decode("utf-8", errors="ignore").strip()
         finally:
             curses.noecho()

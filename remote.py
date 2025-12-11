@@ -12,8 +12,14 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
+
+try:
+    import curses
+except Exception:  # pragma: no cover
+    curses = None
 
 from app import (
     DEFAULT_ISAACSIM_VERSION,
@@ -114,6 +120,141 @@ def _stream_command(
     _send({"type": "exit", "code": return_code})
 
 
+class RemoteCursesUI:
+    LOG_LIMIT = 8
+
+    def __init__(self) -> None:
+        self.address: str = ""
+        self.status: str = "starting"
+        self.incoming: str = ""
+        self.outgoing: str = ""
+        self.notification: str = ""
+        self.notification_ts: float = 0.0
+        self.logs: "deque[str]" = deque(maxlen=self.LOG_LIMIT)
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        has_input = bool(getattr(sys.stdin, "isatty", lambda: False)())
+        has_output = bool(sys.stdout.isatty())
+        self._visible = bool(curses and has_input and has_output)
+        self._thread: Optional[threading.Thread] = None
+        if self._visible:
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        try:
+            curses.wrapper(self._curses_loop)
+        except Exception as exc:  # pragma: no cover
+            self._push_notification(f"UI error: {exc}")
+
+    def _curses_loop(self, stdscr: "curses._CursesWindow") -> None:
+        curses.curs_set(0)
+        stdscr.nodelay(True)
+        while not self._stop_event.is_set():
+            self._draw(stdscr)
+            try:
+                key = stdscr.getch()
+                if key in (ord("q"), ord("Q")):
+                    self._stop_event.set()
+                    break
+            except curses.error:
+                pass
+            time.sleep(0.3)
+
+    def _draw(self, stdscr: "curses._CursesWindow") -> None:
+        stdscr.erase()
+        try:
+            height, width = stdscr.getmaxyx()
+        except Exception:
+            return
+        with self._lock:
+            address = self.address or "pending..."
+            status = self.status or "starting"
+            incoming = self.incoming or "<waiting>"
+            outgoing = self.outgoing or "<waiting>"
+            logs = list(self.logs)
+            note = self.notification
+            if note and (time.time() - self.notification_ts) > 8:
+                note = ""
+        max_width = max(1, width - 1)
+        lines = [
+            "Dropbear RL Remote Agent",
+            "",
+            f"NKN address: {address}",
+            f"Status: {status}",
+            "",
+            f"Incoming: {incoming}",
+            f"Outgoing: {outgoing}",
+            "",
+        ]
+        for idx, line in enumerate(lines):
+            if idx >= height - 2:
+                break
+            try:
+                stdscr.addstr(idx, 0, line[:max_width])
+            except curses.error:
+                pass
+        log_start = len(lines)
+        for idx, log_line in enumerate(logs):
+            row = log_start + idx
+            if row >= height - 2:
+                break
+            try:
+                stdscr.addstr(row, 0, log_line[:max_width])
+            except curses.error:
+                pass
+        if note and height - 1 >= 0:
+            try:
+                stdscr.addstr(height - 1, 0, note[:max_width], curses.A_REVERSE)
+            except curses.error:
+                pass
+        stdscr.refresh()
+
+    def _push_notification(self, message: str) -> None:
+        if not message:
+            return
+        with self._lock:
+            self.notification = message
+            self.notification_ts = time.time()
+
+    def record_log(self, message: str) -> None:
+        if not message:
+            return
+        text = message.strip()
+        if not text:
+            return
+        with self._lock:
+            self.logs.append(text)
+            self._push_notification(text)
+        if not self._visible:
+            print(text)
+
+    def set_address(self, address: str) -> None:
+        with self._lock:
+            self.address = address or ""
+        self._push_notification(f"Local address: {address}")
+
+    def set_status(self, status: str) -> None:
+        with self._lock:
+            self.status = status or ""
+        self._push_notification(status)
+
+    def record_incoming(self, summary: str) -> None:
+        with self._lock:
+            self.incoming = summary or ""
+        self._push_notification(f"Incoming RL payload: {summary}")
+
+    def record_outgoing(self, summary: str) -> None:
+        with self._lock:
+            self.outgoing = summary or ""
+        self._push_notification(f"Outgoing RL payload: {summary}")
+
+
 def boot_remote_venv() -> None:
     if INSIDE_FLAG in sys.argv:
         sys.argv.remove(INSIDE_FLAG)
@@ -163,23 +304,28 @@ class NKNRemoteAgent:
             on_message=self._on_message,
             on_error=self._on_error,
         )
+        self.display = RemoteCursesUI()
         self._running = False
         self._handshake_lock = threading.Lock()
         self._handshake_sent = False
+
+    def _log(self, message: str) -> None:
+        self.display.record_log(message)
 
     def start(self) -> None:
         self.bridge.start()
         if not self.bridge.wait_ready(timeout=30.0):
             raise RuntimeError("NKN bridge failed to become ready.")
         self._running = True
-        print("[remote] NKN remote agent is up; waiting for commands.")
+        self._log("[remote] NKN remote agent is up; waiting for commands.")
         self._send_handshake()
 
     def stop(self) -> None:
         if self._running:
             self._running = False
-            self.bridge.stop()
-            print("[remote] NKN remote agent shutting down.")
+        self.bridge.stop()
+        self.display.stop()
+        self._log("[remote] NKN remote agent shutting down.")
 
     def run_blocking(self) -> None:
         try:
@@ -208,22 +354,26 @@ class NKNRemoteAgent:
             }
             try:
                 self.bridge.send_dm(self.controller_address, payload)
-                print(f"[remote] Sent handshake to controller at {self.controller_address}")
+                self._log(f"[remote] Sent handshake to controller at {self.controller_address}")
                 self._handshake_sent = True
             except Exception as exc:  # pragma: no cover
-                print(f"[remote] Failed to send handshake: {exc}")
+                self._log(f"[remote] Failed to send handshake: {exc}")
 
     def _on_ready(self, address: str) -> None:
-        print(f"[remote] NKN bridge ready at {address}")
+        self._log(f"[remote] NKN bridge ready at {address}")
+        self.display.set_address(address)
+        self.display.set_status("bridge ready")
         self._send_handshake()
 
     def _on_status(self, message: str) -> None:
         if message:
-            print(f"[remote] NKN status: {message}")
+            status = f"[remote] NKN status: {message}"
+            self._log(status)
+            self.display.set_status(message)
 
     def _on_error(self, message: str) -> None:
         if message:
-            print(f"[remote] NKN error: {message}")
+            self._log(f"[remote] NKN error: {message}")
 
     def _on_message(self, src: str, body: Dict[str, Any]) -> None:
         if not isinstance(body, dict) or body.get("type") != "command":
@@ -245,6 +395,13 @@ class NKNRemoteAgent:
         if not isinstance(cmd, list):
             send({"type": "error", "message": "Invalid command payload."})
             return
+        description = body.get("description") or "remote run"
+        preview_parts = " ".join(str(part) for part in cmd[:4])
+        if len(cmd) > 4:
+            preview_parts = f"{preview_parts} ..."
+        incoming_summary = f"{description} ({preview_parts or '<no args>'})"
+        self.display.record_incoming(incoming_summary)
+        self.display.record_outgoing(f"ack {session_id or '<no-id>'}")
         resolved_cmd = resolve_command(cmd)
         _stream_command(
             resolved_cmd,
@@ -253,6 +410,7 @@ class NKNRemoteAgent:
             send,
             session_id=session_id,
         )
+        self.display.record_outgoing(f"completed {description}")
 
 
 def main() -> None:
