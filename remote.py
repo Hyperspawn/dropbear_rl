@@ -293,7 +293,13 @@ def boot_remote_venv() -> None:
         raise RuntimeError("Failed to create remote Python binary.")
     env = prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
     if not REMOTE_MARKER.exists():
+        print("[remote] Bootstrapping IsaacLab-free environment for A100 worker...")
+        print("[remote] Installing: PyTorch, rsl-rl, dropbear_rl_lab[remote]")
+        print("[remote] NOT installing: Isaac Sim, IsaacLab")
+
         run_cmd([str(remote_python), "-m", "pip", "install", "-U", "pip", "setuptools", "wheel"], env=env)
+
+        # Install PyTorch with CUDA 12.8 support
         torch_index = "https://download.pytorch.org/whl/cu128"
         torch_pkgs = [
             f"torch=={DEFAULT_TORCH_VERSION}",
@@ -303,11 +309,29 @@ def boot_remote_venv() -> None:
             torch_index,
         ]
         run_cmd([str(remote_python), "-m", "pip", "install", "-U"] + torch_pkgs, env=env)
-        isaacsim_spec = f"isaacsim[all,extscache]=={DEFAULT_ISAACSIM_VERSION}"
-        run_cmd([str(remote_python), "-m", "pip", "install", isaacsim_spec, "--extra-index-url", DEFAULT_NVIDIA_PYPI], env=env)
-        ensure_dropbear_installed(remote_python, venv_pip(REMOTE_VENV_DIR), DROPBEAR_EXTENSION_DIR)
+
+        # Install rsl-rl-lib (needed for OnPolicyRunner)
+        run_cmd([str(remote_python), "-m", "pip", "install", "rsl-rl-lib>=2.3.1"], env=env)
+
+        # Install dropbear_rl_lab[remote] - includes gymnasium, numpy (NO IsaacLab)
+        dropbear_pkg = str(DROPBEAR_EXTENSION_DIR)
+        run_cmd([str(remote_python), "-m", "pip", "install", "-e", f"{dropbear_pkg}[remote]"], env=env)
+
+        # Verify no IsaacLab was installed
+        try:
+            subprocess.check_call(
+                [str(remote_python), "-c", "import isaaclab"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("[remote] WARNING: IsaacLab is installed! This should not happen on A100 workers.")
+        except subprocess.CalledProcessError:
+            print("[remote] ✓ Verified: No IsaacLab installed (correct for A100 worker)")
+
         ensure_actor_critic_std(REMOTE_VENV_DIR)
         write_marker(REMOTE_VENV_DIR, REMOTE_MARKER.name)
+        print("[remote] Bootstrap complete - IsaacLab-free environment ready")
     os.execv(
         str(remote_python),
         [str(remote_python), str(__file__), INSIDE_FLAG] + [arg for arg in sys.argv[1:]],

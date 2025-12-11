@@ -19,11 +19,10 @@ INSTALL_REQUIRES = [
 # Optional dependencies for remote A100 workers (no IsaacLab)
 EXTRAS_REQUIRE = {
     "remote": [
-        "gymnasium>=0.29",
-        "numpy>=1.24",
-        "torch>=2.0",
-        # Note: rsl_rl should be installed separately via pip
-        # as it's not a standard PyPI package
+        "gymnasium>=0.29.0",
+        "numpy>=1.24.0",
+        # Note: torch is installed separately with CUDA support
+        # Note: rsl_rl is installed separately (not on PyPI)
     ],
 }
 
