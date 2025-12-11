@@ -424,10 +424,7 @@ class _NKNClient:
         }
         self.sidecar.send_dm(self.target_addr, payload)
         while True:
-            try:
-                msg = queue_obj.get(timeout=30.0)
-            except queue.Empty:
-                raise RuntimeError("Timed out waiting for remote command response.")
+            msg = queue_obj.get()
             if msg.get("type") == "exit":
                 return int(msg.get("code", 0))
 
