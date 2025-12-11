@@ -93,46 +93,63 @@ def _wait_for_train_address_via_nkn(bridge: NKNSidecar, timeout: float = 30.0) -
     """
     import time
 
-    print("[train_remote] Waiting for train.py to announce its NKN address...")
-    print("[train_remote] (This can take 15-20s while Isaac Sim starts up...)")
+    print("[train_remote] Waiting for train.py to announce its NKN address...", flush=True)
+    print("[train_remote] (This can take 15-20s while Isaac Sim starts up...)", flush=True)
+    print(f"[train_remote] DEBUG: My NKN address: {bridge.address}", flush=True)
+    print(f"[train_remote] DEBUG: Bridge state: {bridge.state}", flush=True)
 
     received_address = [None]  # Use list to allow modification in nested function
+    message_count = [0]  # Track how many messages we receive
 
     def _message_handler(src: str, body: dict):
         """Handle incoming NKN messages looking for train_address_announcement"""
+        message_count[0] += 1
+        print(f"[train_remote] DEBUG: Received message #{message_count[0]} from {src}", flush=True)
+        print(f"[train_remote] DEBUG: Message body: {body}", flush=True)
+
         msg_type = body.get("type", "")
+        print(f"[train_remote] DEBUG: Message type: {msg_type}", flush=True)
+
         if msg_type == "train_address_announcement":
             train_addr = body.get("train_address", "")
             if train_addr:
-                print(f"[train_remote] ✓ Received train_address from {src}: {train_addr}")
+                print(f"[train_remote] ✓ Received train_address from {src}: {train_addr}", flush=True)
                 received_address[0] = train_addr
             else:
-                print(f"[train_remote] ⚠ Received announcement but no train_address in message")
+                print(f"[train_remote] ⚠ Received announcement but no train_address in message", flush=True)
+        else:
+            print(f"[train_remote] DEBUG: Ignoring message with type '{msg_type}'", flush=True)
 
     # Register temporary message handler
     original_handler = getattr(bridge, "on_message", None)
+    print(f"[train_remote] DEBUG: Original handler: {original_handler}", flush=True)
     bridge.on_message = _message_handler
+    print(f"[train_remote] DEBUG: New handler registered: {bridge.on_message}", flush=True)
 
     start_time = time.time()
+    last_progress_time = 0
     try:
         while time.time() - start_time < timeout:
             if received_address[0]:
+                print(f"[train_remote] ✓ Got train_address after {time.time() - start_time:.1f}s", flush=True)
                 return received_address[0]
 
             elapsed = time.time() - start_time
-            if int(elapsed) % 5 == 0 and int(elapsed) > 0:
-                # Print progress every 5 seconds
+            # Print progress every 5 seconds (using integer comparison to avoid multiple prints)
+            if int(elapsed / 5) > int(last_progress_time / 5):
                 remaining = int(timeout - elapsed)
-                print(f"[train_remote] Still waiting... ({int(elapsed)}s elapsed, {remaining}s remaining)")
+                print(f"[train_remote] Still waiting... ({int(elapsed)}s elapsed, {remaining}s remaining, {message_count[0]} msgs received)", flush=True)
+                last_progress_time = elapsed
 
             time.sleep(0.5)
 
-        print(f"[train_remote] ⚠ Timeout waiting for train_address announcement ({timeout}s)")
+        print(f"[train_remote] ⚠ Timeout waiting for train_address announcement ({timeout}s, {message_count[0]} total messages)", flush=True)
         return None
     finally:
         # Restore original handler
         if original_handler:
             bridge.on_message = original_handler
+            print(f"[train_remote] DEBUG: Restored original handler", flush=True)
 
 
 # Create debug log file
