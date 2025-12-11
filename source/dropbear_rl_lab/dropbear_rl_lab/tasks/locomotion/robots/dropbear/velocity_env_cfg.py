@@ -197,7 +197,7 @@ class ActionsCfg:
             "LL_hip_joint", "LL_knee_actuator_joint", "RL_hip_joint", "RL_knee_actuator_joint",
             "LL_Revolute28", "LL_Revolute29", "RL_Revolute28", "RL_Revolute29",
         ], 
-        scale=0.02,  # More conservative action scale to prevent explosive motions
+        scale=0.01,  # Further reduced action scale to prevent violent flailing
         use_default_offset=True
     )
 

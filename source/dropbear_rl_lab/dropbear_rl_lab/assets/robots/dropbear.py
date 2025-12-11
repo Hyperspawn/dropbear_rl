@@ -119,10 +119,10 @@ DROPBEAR_CFG = DropbearArticulationCfg(
                 "LL_hip_joint", "LL_knee_actuator_joint", "RL_hip_joint", "RL_knee_actuator_joint",
                 "LL_Revolute28", "LL_Revolute29", "RL_Revolute28", "RL_Revolute29",
             ],
-            effort_limit_sim=80.0,  # Maximum torque (Nm) - reasonable for humanoid
-            velocity_limit_sim=50.0,  # Maximum angular velocity (rad/s)
-            stiffness=40.0,  # PD controller proportional gain - reduced for stability
-            damping=2.0,  # PD controller derivative gain - reduced for stability
+            effort_limit_sim=60.0,  # Reduced torque to prevent violent swings
+            velocity_limit_sim=30.0,  # Lower angular velocity cap
+            stiffness=20.0,  # Softer PD gains to reduce flailing
+            damping=1.0,  # Lower damping to match softer stiffness
             friction=0.01,  # Joint friction coefficient - reduced
             armature=0.01,  # Joint armature (inertia)
         ),
@@ -131,10 +131,10 @@ DROPBEAR_CFG = DropbearArticulationCfg(
                 "head_LeadScrew1", "head_LeadScrew2", "head_LeadScrew3",
                 "head_LeadScrew4", "head_LeadScrew5", "head_LeadScrew6",
             ],
-            effort_limit_sim=50.0,  # Lower torque limit for neck
-            velocity_limit_sim=50.0,  # Lower velocity limit for neck
-            stiffness=100.0,  # Higher stiffness for precise head control
-            damping=5.0,  # Higher damping for stability
+            effort_limit_sim=30.0,  # Lower torque limit for neck
+            velocity_limit_sim=30.0,  # Lower velocity limit for neck
+            stiffness=50.0,  # Softer for stability
+            damping=2.0,  # Matched lower damping
             friction=0.01,
             armature=0.01,
         ),
