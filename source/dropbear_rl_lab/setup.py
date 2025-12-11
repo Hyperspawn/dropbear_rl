@@ -21,6 +21,7 @@ EXTRAS_REQUIRE = {
     "remote": [
         "gymnasium>=0.29.0",
         "numpy>=1.24.0",
+        "tensorboard>=2.14.0",  # Required by rsl-rl for logging
         # Note: torch is installed separately with CUDA support
         # Note: rsl_rl is installed separately (not on PyPI)
     ],
