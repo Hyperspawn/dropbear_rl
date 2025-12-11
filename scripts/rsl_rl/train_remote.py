@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -112,6 +113,18 @@ def _load_controller_address() -> Optional[str]:
     return address or None
 
 
+# Create debug log file
+DEBUG_LOG = Path("/tmp/train_remote_debug.log")
+with open(DEBUG_LOG, "w") as f:
+    f.write(f"[train_remote] SCRIPT INVOKED at {time.time()}\n")
+    f.write(f"[train_remote] sys.argv = {sys.argv}\n")
+
+print("=" * 80, flush=True)
+print("[train_remote] SCRIPT INVOKED - Parsing arguments...", flush=True)
+print(f"[train_remote] sys.argv = {sys.argv}", flush=True)
+print(f"[train_remote] Debug log: {DEBUG_LOG}", flush=True)
+print("=" * 80, flush=True)
+
 parser = argparse.ArgumentParser(description="Train RL agent with RSL-RL on remote worker (no IsaacLab).")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
@@ -127,6 +140,8 @@ parser.add_argument("--app-address", type=str, default=None, help="Controller/ap
 cli_args.add_rsl_rl_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
+print(f"[train_remote] Parsed --app-address: {args_cli.app_address}", flush=True)
+
 # Reset argv so Hydra decorator sees only overrides
 sys.argv = [sys.argv[0]] + hydra_args
 
@@ -134,6 +149,15 @@ sys.argv = [sys.argv[0]] + hydra_args
 @hydra_task_config(args_cli.task or DEFAULT_TASK, "rsl_rl_cfg_entry_point")
 def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
     """Train with RSL-RL agent on remote worker."""
+    # Enable unbuffered output for remote logging
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+
+    print("=" * 80, flush=True)
+    print("[train_remote] SCRIPT STARTED", flush=True)
+    print("=" * 80, flush=True)
+
     if args_cli.device:
         env_cfg.sim.device = args_cli.device
         agent_cfg.device = args_cli.device
