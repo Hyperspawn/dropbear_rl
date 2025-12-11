@@ -112,7 +112,7 @@ class EventCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="world"),  # Dropbear's main body
             # Keep mass perturbations modest to avoid instability
-            "mass_distribution_params": (-0.5, 1.0),
+            "mass_distribution_params": (0.0, 0.5),
             "operation": "add",
         },
     )
@@ -177,10 +177,10 @@ class CommandsCfg:
         # Disable debug vectors to avoid accumulating arrows in the viewport
         debug_vis=False,
         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1)
+            lin_vel_x=(-0.05, 0.05), lin_vel_y=(-0.05, 0.05), ang_vel_z=(-0.05, 0.05)
         ),
         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.3, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5)
+            lin_vel_x=(-0.2, 0.4), lin_vel_y=(-0.2, 0.2), ang_vel_z=(-0.3, 0.3)
         ),
     )
 
@@ -198,7 +198,7 @@ class ActionsCfg:
             "LL_hip_joint", "LL_knee_actuator_joint", "RL_hip_joint", "RL_knee_actuator_joint",
             "LL_Revolute28", "LL_Revolute29", "RL_Revolute28", "RL_Revolute29",
         ], 
-        scale=0.01,  # Further reduced action scale to prevent violent flailing
+        scale=0.005,  # More conservative action scale to prevent violent flailing
         use_default_offset=True
     )
 

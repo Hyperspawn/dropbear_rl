@@ -119,10 +119,10 @@ DROPBEAR_CFG = DropbearArticulationCfg(
                 "LL_hip_joint", "LL_knee_actuator_joint", "RL_hip_joint", "RL_knee_actuator_joint",
                 "LL_Revolute28", "LL_Revolute29", "RL_Revolute28", "RL_Revolute29",
             ],
-            effort_limit_sim=60.0,  # Reduced torque to prevent violent swings
-            velocity_limit_sim=30.0,  # Lower angular velocity cap
-            stiffness=20.0,  # Softer PD gains to reduce flailing
-            damping=1.0,  # Lower damping to match softer stiffness
+            effort_limit_sim=40.0,  # Further reduce torque to prevent violent swings
+            velocity_limit_sim=15.0,  # Lower angular velocity cap
+            stiffness=10.0,  # Softer PD gains to reduce flailing
+            damping=1.0,  # Keep light damping
             friction=0.01,  # Joint friction coefficient - reduced
             armature=0.01,  # Joint armature (inertia)
         ),
