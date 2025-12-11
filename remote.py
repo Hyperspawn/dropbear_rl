@@ -40,6 +40,7 @@ REMOTE_VENV_NAME = "env_remote"
 REMOTE_VENV_DIR = PROJECT_ROOT / REMOTE_VENV_NAME
 REMOTE_MARKER = REMOTE_VENV_DIR / ".remote_bootstrap_ok"
 INSIDE_FLAG = "--_inside-remote"
+SEED_FILE = PROJECT_ROOT / ".remote_nkn_seed"
 
 
 def _prepare_env() -> Dict[str, str]:
@@ -59,6 +60,22 @@ def resolve_command(cmd: Iterable[str]) -> List[str]:
             else:
                 resolved.append(part)
     return resolved
+
+
+def _load_persistent_seed() -> str:
+    if not SEED_FILE.exists():
+        return ""
+    try:
+        return SEED_FILE.read_text(encoding="utf-8").strip().lower().replace("0x", "")
+    except Exception:
+        return ""
+
+
+def _save_persistent_seed(seed: str) -> None:
+    try:
+        SEED_FILE.write_text(seed.lower(), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _stream_command(
@@ -249,8 +266,11 @@ def main() -> None:
 
     seed = args.nkn_seed.strip().lower().replace("0x", "")
     if not seed:
+        seed = _load_persistent_seed()
+    if not seed:
         seed = secrets.token_hex(32)
-        print(f"[remote] Generated random NKN seed for remote agent: {seed}")
+        print(f"[remote] Generated NKN seed for remote agent: {seed}")
+    _save_persistent_seed(seed)
 
     agent = NKNRemoteAgent(seed_hex=seed, identifier=args.nkn_identifier, num_subclients=args.nkn_num_subclients, controller_address=args.app_address)
     agent.run_blocking()
