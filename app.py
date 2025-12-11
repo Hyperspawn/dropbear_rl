@@ -1700,7 +1700,18 @@ def main() -> int:
             run_local_python_script(py, script, PROJECT_ROOT, run_env, unknown)
 
         elif args.run == "dropbear_train":
-            script_path = str(PROJECT_ROOT / "scripts" / "rsl_rl" / "train.py")
+            # Determine which script to use based on remote mode
+            if remote_client.is_remote_enabled():
+                # Use train_remote.py for remote A100 workers (no IsaacLab)
+                script_rel = Path("scripts") / "rsl_rl" / "train_remote.py"
+                print("[i] Remote mode active: dispatching train_remote.py to tensor workers")
+                print("[i] train_remote.py runs IsaacLab-free on A100 workers")
+            else:
+                # Use train.py for local RTX controller (with IsaacLab)
+                script_rel = Path("scripts") / "rsl_rl" / "train.py"
+                print("[i] Local mode: running train.py with IsaacLab on RTX")
+
+            script_path = str(PROJECT_ROOT / script_rel)
             train_args: List[str] = [
                 f"--task={args.dropbear_task}",
                 f"--max_iterations={args.dropbear_max_iterations}",
@@ -1718,6 +1729,7 @@ def main() -> int:
                 train_args.append("--headless")
             cmd = base_cmd + [script_path] + train_args
             if remote_client.is_remote_enabled():
+                remote_cmd = ["python", str(script_rel)] + train_args
                 cfg = remote_client.get_remote_config()
                 if cfg.get("mode") == "nkn":
                     target = remote_client.get_nkn_target()
@@ -1732,7 +1744,8 @@ def main() -> int:
                         print(f"[i] Remote agent reported address: {remote_addr}")
                     else:
                         print("[i] Remote agent address pending handshake.")
-                remote_client.dispatch_remote(cmd, description="dropbear_train")
+                    print("[i] Remote worker will execute train_remote.py (no IsaacLab imports)")
+                remote_client.dispatch_remote(remote_cmd, description="dropbear_train")
             else:
                 run_cmd(cmd, cwd=repo_dir, env=run_env)
 
