@@ -303,26 +303,32 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             save_dir=Path(log_root_path),
         )
 
-        # Register message handler for checkpoints but keep controller handler alive
         controller_on_message = getattr(nkn_bridge, "on_message", None)
 
+        CHECKPOINT_MSG_TYPES = {
+            MSG_CHECKPOINT_START,
+            MSG_CHECKPOINT_CHUNK,
+            MSG_CHECKPOINT_REQUEST_RETRY,
+            MSG_CHECKPOINT_ACK,
+        }
+
         def checkpoint_message_handler(src: str, body: dict):
-            """Handle checkpoint transfer messages."""
+            """Handle checkpoint transfer messages while preserving controller traffic."""
             if not isinstance(body, dict):
                 if controller_on_message:
                     controller_on_message(src, body)
                 return
-            envelope = None
-            try:
-                envelope = MessageEnvelope.from_dict(body)
-            except Exception as e:
-                print(f"[train.py] Error parsing checkpoint envelope: {e}")
+
+            msg_type = body.get("msg_type")
+            if msg_type not in CHECKPOINT_MSG_TYPES:
                 if controller_on_message:
                     controller_on_message(src, body)
                 return
 
-            msg_type = getattr(envelope, "msg_type", None)
-            if not msg_type:
+            try:
+                envelope = MessageEnvelope.from_dict(body)
+            except Exception as e:
+                print(f"[train.py] Error parsing checkpoint envelope: {e}")
                 if controller_on_message:
                     controller_on_message(src, body)
                 return
@@ -334,13 +340,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 checkpoint_receiver.handle_checkpoint_chunk(src, envelope.payload)
                 return
             if msg_type == MSG_CHECKPOINT_REQUEST_RETRY:
-                # Checkpoint protocol commands should not fall through to env
                 return
             if msg_type == MSG_CHECKPOINT_ACK:
                 return
-
-            if controller_on_message:
-                controller_on_message(src, body)
 
         nkn_bridge.on_message = checkpoint_message_handler
         print("[train.py] Checkpoint receiver enabled - will save models from A100")
