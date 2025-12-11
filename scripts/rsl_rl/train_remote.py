@@ -59,7 +59,7 @@ def dump_pickle_file(filename: str, data: object) -> None:
         pickle.dump(data, handle)
 
 
-def main():
+def main(provided_sidecar=None, argv=None):
     """Train with RSL-RL agent on remote worker."""
     # Parse arguments (same structure as train.py)
     parser = argparse.ArgumentParser(description="Train RL agent with RSL-RL on remote worker (no IsaacLab).")
@@ -82,7 +82,7 @@ def main():
     cli_args.add_rsl_rl_args(parser)
 
     # Parse known args, collect Hydra overrides
-    args_cli, hydra_args = parser.parse_known_args()
+    args_cli, hydra_args = parser.parse_known_args(argv)
 
     print(f"[train_remote] Task: {args_cli.task}")
     print(f"[train_remote] Device: {args_cli.device}")
@@ -113,54 +113,58 @@ def main():
     controller_address = controller_address.strip().rstrip("\\/")
 
     # Build or reuse NKN sidecar for worker dataplane
-    nkn_seed = (
-        (args_cli.nkn_seed or "").strip()
-        or os.environ.get("DROPBEAR_REMOTE_NKN_SEED", "").strip()
-    )
-    nkn_identifier = (
-        args_cli.nkn_identifier
-        or os.environ.get("DROPBEAR_REMOTE_NKN_IDENTIFIER", "").strip()
-        or "dropbear_remote_worker"
-    )
-    nkn_seed_ws = ""
-    nkn_num_subclients = 2
-
-    # Attempt to load config for defaults (if present)
-    config_file = PROJECT_ROOT / "isaaclab_remote_connection.json"
-    if config_file.exists():
-        try:
-            config = json.loads(config_file.read_text(encoding="utf-8"))
-            nkn_cfg = config.get("nkn", {})
-            nkn_seed = nkn_seed or str(nkn_cfg.get("seed", "")).strip()
-            controller_address = controller_address or str(nkn_cfg.get("app_address", "")).strip()
-            nkn_identifier = args_cli.nkn_identifier or str(nkn_cfg.get("identifier", "dropbear_remote_worker"))
-            nkn_seed_ws = str(nkn_cfg.get("seed_ws", "")).strip()
-            try:
-                nkn_num_subclients = max(1, int(nkn_cfg.get("num_subclients", nkn_num_subclients)))
-            except Exception:
-                nkn_num_subclients = 2
-        except Exception as exc:  # pragma: no cover
-            print(f"[train_remote] Failed to read NKN config: {exc}")
-
-    if not nkn_seed:
-        nkn_seed = secrets.token_hex(32)
-        print(f"[train_remote] Generated transient NKN seed for worker: {nkn_seed}")
-
     nkn_bridge = None
-    if controller_address:
-        try:
-            nkn_bridge = NKNSidecar(
-                seed_hex=nkn_seed,
-                identifier=nkn_identifier,
-                num_subclients=nkn_num_subclients,
-                seed_ws=nkn_seed_ws,
-            )
-            nkn_bridge.start()
-            nkn_bridge.wait_ready(timeout=30.0)
-            print(f"[train_remote] NKN bridge ready at {nkn_bridge.address}")
-        except Exception as exc:
-            print(f"[train_remote] Failed to start NKN sidecar: {exc}")
-            nkn_bridge = None
+    if provided_sidecar is not None:
+        nkn_bridge = provided_sidecar
+        print(f"[train_remote] Reusing existing NKN sidecar at {nkn_bridge.address}")
+    else:
+        nkn_seed = (
+            (args_cli.nkn_seed or "").strip()
+            or os.environ.get("DROPBEAR_REMOTE_NKN_SEED", "").strip()
+        )
+        nkn_identifier = (
+            args_cli.nkn_identifier
+            or os.environ.get("DROPBEAR_REMOTE_NKN_IDENTIFIER", "").strip()
+            or "dropbear_remote_worker"
+        )
+        nkn_seed_ws = ""
+        nkn_num_subclients = 2
+
+        # Attempt to load config for defaults (if present)
+        config_file = PROJECT_ROOT / "isaaclab_remote_connection.json"
+        if config_file.exists():
+            try:
+                config = json.loads(config_file.read_text(encoding="utf-8"))
+                nkn_cfg = config.get("nkn", {})
+                nkn_seed = nkn_seed or str(nkn_cfg.get("seed", "")).strip()
+                controller_address = controller_address or str(nkn_cfg.get("app_address", "")).strip()
+                nkn_identifier = args_cli.nkn_identifier or str(nkn_cfg.get("identifier", "dropbear_remote_worker"))
+                nkn_seed_ws = str(nkn_cfg.get("seed_ws", "")).strip()
+                try:
+                    nkn_num_subclients = max(1, int(nkn_cfg.get("num_subclients", nkn_num_subclients)))
+                except Exception:
+                    nkn_num_subclients = 2
+            except Exception as exc:  # pragma: no cover
+                print(f"[train_remote] Failed to read NKN config: {exc}")
+
+        if not nkn_seed:
+            nkn_seed = secrets.token_hex(32)
+            print(f"[train_remote] Generated transient NKN seed for worker: {nkn_seed}")
+
+        if controller_address:
+            try:
+                nkn_bridge = NKNSidecar(
+                    seed_hex=nkn_seed,
+                    identifier=nkn_identifier,
+                    num_subclients=nkn_num_subclients,
+                    seed_ws=nkn_seed_ws,
+                )
+                nkn_bridge.start()
+                nkn_bridge.wait_ready(timeout=30.0)
+                print(f"[train_remote] NKN bridge ready at {nkn_bridge.address}")
+            except Exception as exc:
+                print(f"[train_remote] Failed to start NKN sidecar: {exc}")
+                nkn_bridge = None
 
     if controller_address:
         print("[train_remote] ========================================")

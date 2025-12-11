@@ -143,6 +143,7 @@ def _stream_command(
         _send({"type": "log", "message": line.rstrip()})
     return_code = process.wait()
     _send({"type": "exit", "code": return_code})
+    return return_code
 
 
 class RemoteCursesUI:
@@ -519,13 +520,42 @@ class NKNRemoteAgent:
         self.display.record_incoming(incoming_summary)
         self.display.record_outgoing(f"ack {session_id or '<no-id>'}")
         resolved_cmd = resolve_command(cmd)
-        _stream_command(
-            resolved_cmd,
-            body.get("description"),
-            self.env,
-            send,
-            session_id=session_id,
-        )
+
+        # Inline execution for train_remote to reuse the active NKN sidecar
+        inline_handled = False
+        try:
+            if (
+                len(resolved_cmd) >= 2
+                and resolved_cmd[0] in ("python", "python3")
+                and resolved_cmd[1].endswith("scripts/rsl_rl/train_remote.py")
+            ):
+                inline_handled = True
+                send({"type": "start", "description": description})
+                try:
+                    import importlib
+
+                    train_mod = importlib.import_module("scripts.rsl_rl.train_remote")
+                    argv = resolved_cmd[2:]
+                    train_mod.main(provided_sidecar=self.bridge, argv=argv)
+                    exit_code = 0
+                except SystemExit as exc:  # capture argparse exits
+                    exit_code = int(exc.code or 0)
+                except Exception as exc:
+                    exit_code = 1
+                    send({"type": "error", "message": f"Inline train_remote failed: {exc}"})
+                send({"type": "exit", "code": exit_code})
+        except Exception as exc:
+            inline_handled = False
+            send({"type": "error", "message": f"Inline dispatch check failed: {exc}"})
+
+        if not inline_handled:
+            _stream_command(
+                resolved_cmd,
+                body.get("description"),
+                self.env,
+                send,
+                session_id=session_id,
+            )
         self.display.record_outgoing(f"completed {description}")
 
 
