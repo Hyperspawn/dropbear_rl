@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -248,7 +249,8 @@ def main() -> None:
 
     seed = args.nkn_seed.strip().lower().replace("0x", "")
     if not seed:
-        raise RuntimeError("NKN seed hex is required to start the remote agent.")
+        seed = secrets.token_hex(32)
+        print(f"[remote] Generated random NKN seed for remote agent: {seed}")
 
     agent = NKNRemoteAgent(seed_hex=seed, identifier=args.nkn_identifier, num_subclients=args.nkn_num_subclients, controller_address=args.app_address)
     agent.run_blocking()

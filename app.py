@@ -1125,7 +1125,7 @@ def run_curses_interface() -> Optional[list[str]]:
         def _cycle_remote_mode() -> None:
             nonlocal listener_error
             modes = ["reverse", "direct", "nkn"]
-            current = remote_settings.get("mode", "reverse")
+            current = remote_settings.get("mode", "nkn")
             try:
                 idx = modes.index(current)
             except ValueError:
@@ -1458,7 +1458,7 @@ def main() -> int:
     ap.add_argument(
         "--remote-mode",
         choices=["direct", "reverse", "nkn"],
-        default="reverse",
+        default="nkn",
         help="Preferred remote compute mode when remote compute is enabled.",
     )
     ap.add_argument(
