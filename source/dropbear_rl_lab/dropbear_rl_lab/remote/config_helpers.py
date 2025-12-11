@@ -29,8 +29,10 @@ def load_task_config(task_name: str) -> Dict[str, Any]:
     default_config = {
         "task_name": task_name,
         "num_envs": 4,
-        "num_obs": 48,
-        "num_actions": 12,
+        # Use full policy obs dim from IsaacLab env (policy group ~193)
+        "num_obs": 193,
+        # Action dim for Dropbear velocity task (IsaacLab ActionManager reports 22)
+        "num_actions": 22,
         "device": "cuda:0",
         "episode_length_s": 20.0,
         "dt": 0.02,
