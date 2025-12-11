@@ -29,6 +29,7 @@ MSG_REWARD_BATCH = "reward_batch"
 MSG_CHECKPOINT = "checkpoint"
 MSG_METRICS = "metrics"
 MSG_TRAIN_DONE = "train_done"
+MSG_HEARTBEAT = "heartbeat"
 
 
 @dataclass
@@ -337,3 +338,15 @@ def create_metrics_message(
         "metrics": metrics,
     }
     return sequencer.create_message(MSG_METRICS, payload)
+
+
+def create_heartbeat_message(
+    sequencer: MessageSequencer,
+    role: str,
+    info: Optional[Dict[str, Any]] = None,
+) -> MessageEnvelope:
+    """Create lightweight heartbeat to confirm liveness."""
+    payload = {"role": role}
+    if info:
+        payload["info"] = info
+    return sequencer.create_message(MSG_HEARTBEAT, payload)

@@ -19,7 +19,9 @@ from remote_protocol_rl import (
     MSG_OBS_BATCH,
     MessageEnvelope,
     MessageSequencer,
+    MSG_HEARTBEAT,
     create_obs_batch_message,
+    create_heartbeat_message,
 )
 
 
@@ -53,10 +55,15 @@ class ControllerRemoteEnvWrapper:
         self.sequencer = MessageSequencer()
         self.action_queue: queue.Queue[MessageEnvelope] = queue.Queue(maxsize=100)
         self.step_counter = 0
+        self._stop_event = threading.Event()
 
         # Register message handler
         self._original_on_message = getattr(nkn_bridge, "on_message", None)
         nkn_bridge.on_message = self._handle_network_message
+
+        # Heartbeat sender
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
 
         # Delegate all attributes to base_env
         self.num_envs = base_env.num_envs
@@ -83,6 +90,9 @@ class ControllerRemoteEnvWrapper:
         try:
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
+
+            if processed and processed.msg_type == MSG_HEARTBEAT:
+                return
 
             if processed and processed.msg_type == MSG_ACTION_BATCH:
                 # Queue action message
@@ -180,6 +190,9 @@ class ControllerRemoteEnvWrapper:
     def close(self):
         """Clean up resources."""
         print("[controller_env] Closing controller wrapper")
+        self._stop_event.set()
+        if getattr(self, "_heartbeat_thread", None):
+            self._heartbeat_thread.join(timeout=1.0)
         if getattr(self, "_original_on_message", None):
             self.nkn_bridge.on_message = self._original_on_message
         if hasattr(self.base_env, 'close'):
@@ -188,3 +201,13 @@ class ControllerRemoteEnvWrapper:
     def __getattr__(self, name):
         """Delegate unknown attributes to base environment."""
         return getattr(self.base_env, name)
+
+    def _heartbeat_loop(self) -> None:
+        """Periodically send heartbeat to the worker to keep the link alive."""
+        while not self._stop_event.is_set():
+            try:
+                hb = create_heartbeat_message(self.sequencer, role="controller")
+                self.nkn_bridge.send_dm(self.worker_address, hb.to_dict())
+            except Exception:
+                pass
+            self._stop_event.wait(5.0)

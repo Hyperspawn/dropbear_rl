@@ -25,10 +25,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from remote_protocol_rl import (
     MSG_ACTION_BATCH,
     MSG_OBS_BATCH,
+    MSG_HEARTBEAT,
     MessageEnvelope,
     MessageSequencer,
     TensorSerializer,
     create_action_batch_message,
+    create_heartbeat_message,
 )
 
 
@@ -118,6 +120,7 @@ class RemoteVecEnv:
         self._current_obs: Optional[Dict[str, torch.Tensor]] = None
         self._current_rewards: Optional[torch.Tensor] = None
         self._current_dones: Optional[torch.Tensor] = None
+        self._stop_event = threading.Event()
 
         # Additional attributes required by RSL-RL OnPolicyRunner
         self.max_episode_length = 1000  # Default episode length
@@ -128,6 +131,10 @@ class RemoteVecEnv:
         # Register message handler
         self._original_on_message = getattr(nkn_bridge, "on_message", None)
         nkn_bridge.on_message = self._handle_network_message
+
+        # Heartbeat sender
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
 
         print(f"[remote_env] Initialized for {num_envs} envs, waiting for obs from {controller_address}")
 
@@ -147,6 +154,9 @@ class RemoteVecEnv:
             if processed and processed.msg_type == MSG_OBS_BATCH:
                 # Queue observation message
                 self.obs_queue.put(processed, block=False)
+
+            if processed and processed.msg_type == MSG_HEARTBEAT:
+                return
 
         except Exception as e:
             print(f"[remote_env] Error processing message: {e}")
@@ -271,6 +281,19 @@ class RemoteVecEnv:
     def close(self) -> None:
         """Clean up resources."""
         print("[remote_env] Closing remote environment")
+        self._stop_event.set()
+        if getattr(self, "_heartbeat_thread", None):
+            self._heartbeat_thread.join(timeout=1.0)
         # Restore original message handler
         if getattr(self, "_original_on_message", None):
             self.nkn_bridge.on_message = self._original_on_message
+
+    def _heartbeat_loop(self) -> None:
+        """Periodically send heartbeat to controller to prove liveness."""
+        while not self._stop_event.is_set():
+            try:
+                hb = create_heartbeat_message(self.sequencer, role="worker")
+                self.nkn_bridge.send_dm(self.controller_address, hb.to_dict())
+            except Exception:
+                pass
+            self._stop_event.wait(5.0)
