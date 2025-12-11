@@ -146,6 +146,26 @@ def _stream_command(
     return return_code
 
 
+class _NullDisplay:
+    def record_incoming(self, *_args, **_kwargs):  # pragma: no cover
+        pass
+
+    def record_outgoing(self, *_args, **_kwargs):  # pragma: no cover
+        pass
+
+    def record_log(self, *_args, **_kwargs):  # pragma: no cover
+        pass
+
+    def set_address(self, *_args, **_kwargs):  # pragma: no cover
+        pass
+
+    def set_status(self, *_args, **_kwargs):  # pragma: no cover
+        pass
+
+    def stop(self):  # pragma: no cover
+        pass
+
+
 class RemoteCursesUI:
     LOG_LIMIT = 8
 
@@ -393,7 +413,14 @@ def boot_remote_venv() -> None:
 
 
 class NKNRemoteAgent:
-    def __init__(self, seed_hex: str, identifier: str, num_subclients: int, controller_address: str) -> None:
+    def __init__(
+        self,
+        seed_hex: str,
+        identifier: str,
+        num_subclients: int,
+        controller_address: str,
+        enable_ui: bool = True,
+    ) -> None:
         if not seed_hex:
             raise ValueError("NKN seed hex is required for the remote agent.")
         self.env = _prepare_env()
@@ -412,7 +439,7 @@ class NKNRemoteAgent:
             on_message=self._on_message,
             on_error=self._on_error,
         )
-        self.display = RemoteCursesUI()
+        self.display = RemoteCursesUI() if enable_ui else _NullDisplay()
         self._running = False
         self._handshake_lock = threading.Lock()
         self._handshake_sent = False
@@ -566,6 +593,7 @@ def main() -> None:
     parser.add_argument("--nkn-identifier", type=str, default=f"dropbear_remote_{socket.gethostname()}", help="Identifier for the NKN bridge.")
     parser.add_argument("--nkn-num-subclients", type=int, default=2, help="Number of NKN sub-clients.")
     parser.add_argument("--app-address", type=str, default=os.environ.get("DROPBEAR_APP_NKN_ADDRESS", ""), help="Controller/app NKN address for handshake.")
+    parser.add_argument("--no-ui", action="store_true", help="Disable curses UI (stdout-only logging).")
     args = parser.parse_args()
 
     seed = args.nkn_seed.strip().lower().replace("0x", "")
@@ -582,6 +610,7 @@ def main() -> None:
         identifier=args.nkn_identifier,
         num_subclients=args.nkn_num_subclients,
         controller_address=controller_address,
+        enable_ui=not args.no_ui,
     )
     agent.run_blocking()
 
