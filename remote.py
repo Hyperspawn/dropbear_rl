@@ -559,10 +559,10 @@ class NKNRemoteAgent:
                 inline_handled = True
                 send({"type": "start", "description": description})
                 try:
-                    import importlib
+                    import importlib.machinery
+                    import importlib.util
                     from remote_protocol_rl import MessageSequencer, create_train_start_message
 
-                    train_mod = importlib.import_module("scripts.rsl_rl.train_remote")
                     argv = resolved_cmd[2:]
 
                     # Extract controller address for an early train_start signal
@@ -589,6 +589,15 @@ class NKNRemoteAgent:
                         except Exception as exc:  # pragma: no cover
                             self.display.record_log(f"[remote] Failed to send early train_start: {exc}")
 
+                    # Load train_remote.py directly from path to avoid package issues
+                    tr_path = PROJECT_ROOT / "scripts" / "rsl_rl" / "train_remote.py"
+                    loader = importlib.machinery.SourceFileLoader("train_remote_inline", str(tr_path))
+                    spec = importlib.util.spec_from_loader(loader.name, loader)
+                    if spec is None or spec.loader is None:
+                        raise RuntimeError("Could not load train_remote module")
+                    train_mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(train_mod)  # type: ignore
+
                     train_mod.main(provided_sidecar=self.bridge, argv=argv)
                     exit_code = 0
                 except SystemExit as exc:  # capture argparse exits
@@ -596,6 +605,7 @@ class NKNRemoteAgent:
                 except Exception as exc:
                     exit_code = 1
                     send({"type": "error", "message": f"Inline train_remote failed: {exc}"})
+                    self.display.record_log(f"[remote] Inline train_remote failed: {exc}")
                 send({"type": "exit", "code": exit_code})
         except Exception as exc:
             inline_handled = False
