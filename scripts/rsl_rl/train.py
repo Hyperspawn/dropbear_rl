@@ -303,41 +303,44 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             save_dir=Path(log_root_path),
         )
 
-        # Register message handler for checkpoints
-        original_on_message = getattr(nkn_bridge, "on_message", None)
+        # Register message handler for checkpoints but keep controller handler alive
+        controller_on_message = getattr(nkn_bridge, "on_message", None)
 
         def checkpoint_message_handler(src: str, body: dict):
             """Handle checkpoint transfer messages."""
             if not isinstance(body, dict):
-                if original_on_message:
-                    original_on_message(src, body)
+                if controller_on_message:
+                    controller_on_message(src, body)
                 return
+            envelope = None
             try:
                 envelope = MessageEnvelope.from_dict(body)
             except Exception as e:
                 print(f"[train.py] Error parsing checkpoint envelope: {e}")
-                if original_on_message:
-                    original_on_message(src, body)
+                if controller_on_message:
+                    controller_on_message(src, body)
                 return
+
             msg_type = getattr(envelope, "msg_type", None)
             if not msg_type:
-                if original_on_message:
-                    original_on_message(src, body)
+                if controller_on_message:
+                    controller_on_message(src, body)
                 return
 
             if msg_type == MSG_CHECKPOINT_START:
                 checkpoint_receiver.handle_checkpoint_start(src, envelope.payload)
-            elif msg_type == MSG_CHECKPOINT_CHUNK:
+                return
+            if msg_type == MSG_CHECKPOINT_CHUNK:
                 checkpoint_receiver.handle_checkpoint_chunk(src, envelope.payload)
-            elif msg_type == MSG_CHECKPOINT_REQUEST_RETRY:
-                # Forward to ControllerRemoteEnvWrapper if needed
-                pass
-            elif msg_type == MSG_CHECKPOINT_ACK:
-                # A100 acknowledged receipt
-                pass
-            else:
-                if original_on_message:
-                    original_on_message(src, body)
+                return
+            if msg_type == MSG_CHECKPOINT_REQUEST_RETRY:
+                # Checkpoint protocol commands should not fall through to env
+                return
+            if msg_type == MSG_CHECKPOINT_ACK:
+                return
+
+            if controller_on_message:
+                controller_on_message(src, body)
 
         nkn_bridge.on_message = checkpoint_message_handler
         print("[train.py] Checkpoint receiver enabled - will save models from A100")
