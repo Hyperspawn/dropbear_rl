@@ -3,312 +3,196 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Remote training script for RSL-RL agent without IsaacLab dependencies.
+"""Remote training script for RSL-RL agents without IsaacLab dependencies."""
 
-This script runs on A100 tensor workers and performs pure tensor math without
-requiring IsaacLab, RTX GPUs, or Isaac Sim. It reuses the CLI args and Hydra
-decorators from train.py but uses lightweight stub environments.
-"""
+from __future__ import annotations
 
 import argparse
-import os
-import pickle
+import json
 import sys
-from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import torch
-
-# IMPORTANT: This script NEVER imports IsaacLab
-# It only imports tensor math libraries and RL helpers
-
-# Add scripts directory to path for cli_args import
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
-sys.path.insert(0, str(SCRIPT_DIR))
-sys.path.insert(0, str(PROJECT_ROOT))
-
-import cli_args  # isort: skip
-
-# Import remote helpers (no IsaacLab dependency)
-from dropbear_rl_lab.remote import build_stub_env, load_task_config, apply_hydra_overrides
-
-# Import RSL-RL directly (available on remote worker)
 from rsl_rl.runners import OnPolicyRunner
 
-print("[train_remote] Running on IsaacLab-free tensor worker")
-print("[train_remote] This script never imports IsaacLab modules")
+import cli_args  # isort: skip
+from dropbear_rl_lab.remote import (
+    RemoteAgentCfg,
+    RemoteEnvCfg,
+    RemoteVecEnv,
+    build_log_paths,
+    build_stub_env,
+    dump_json_file,
+    dump_pickle_file,
+    ensure_log_directory,
+    hydra_task_config,
+)
+from nkn_sidecar import NKNSidecar
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+CONFIG_FILE = PROJECT_ROOT / "isaaclab_remote_connection.json"
+DEFAULT_TASK = "Isaac-Velocity-Dropbear-v0"
 
 
-def dump_pickle_file(filename: str, data: object) -> None:
-    """Persist configuration data using pickle."""
-    directory = os.path.dirname(filename)
-    if directory and not os.path.exists(directory):
-        os.makedirs(directory, exist_ok=True)
-    with open(filename, "wb") as handle:
-        pickle.dump(data, handle)
+def _load_connection_config() -> Dict[str, Any]:
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
-def main():
-    """Train with RSL-RL agent on remote worker."""
-    # Parse arguments (same structure as train.py)
-    parser = argparse.ArgumentParser(description="Train RL agent with RSL-RL on remote worker (no IsaacLab).")
-    parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
-    parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-    parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
-    parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-    parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-    parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
-    parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
-    parser.add_argument("--distributed", action="store_true", default=False, help="Run training with multiple GPUs.")
-    parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on.")
-    parser.add_argument("--headless", action="store_true", default=False, help="Headless mode (ignored on remote).")
+def _start_nkn_bridge(controller_address: str) -> NKNSidecar:
+    if not controller_address:
+        raise RuntimeError("Controller address required for remote NKNSidecar.")
+    cfg = _load_connection_config()
+    nkn_cfg = cfg.get("nkn", {})
+    seed = str(nkn_cfg.get("seed", "")).strip()
+    identifier = str(nkn_cfg.get("remote_address") or nkn_cfg.get("identifier") or "dropbear_remote")
+    num_subclients = max(1, int(nkn_cfg.get("num_subclients", 2)))
+    seed_ws = str(nkn_cfg.get("seed_ws") or "")
+    bridge = NKNSidecar(
+        seed_hex=seed,
+        identifier=identifier,
+        num_subclients=num_subclients,
+        seed_ws=seed_ws,
+        on_ready=lambda addr: print(f"[train_remote] NKN bridge ready at {addr}"),
+    )
+    bridge.start()
+    if not bridge.wait_ready(timeout=30.0):
+        raise RuntimeError("NKN bridge failed to become ready.")
+    bridge.send_dm(controller_address, {"type": "start", "description": "train_remote ready"})
+    return bridge
 
-    # Append RSL-RL cli arguments
-    cli_args.add_rsl_rl_args(parser)
 
-    # Parse known args, collect Hydra overrides
-    args_cli, hydra_args = parser.parse_known_args()
+def _dump_run_configs(log_dir: Path, env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
+    params_dir = log_dir / "params"
+    params_dir.mkdir(parents=True, exist_ok=True)
+    dump_json_file(params_dir / "env.json", env_cfg.to_dict())
+    dump_json_file(params_dir / "agent.json", agent_cfg.to_dict())
+    dump_pickle_file(params_dir / "env.pkl", env_cfg.to_dict())
+    dump_pickle_file(params_dir / "agent.pkl", agent_cfg.to_dict())
 
-    print(f"[train_remote] Task: {args_cli.task}")
-    print(f"[train_remote] Device: {args_cli.device}")
-    print(f"[train_remote] Num envs: {args_cli.num_envs}")
-    print(f"[train_remote] Max iterations: {args_cli.max_iterations}")
-    print(f"[train_remote] Hydra overrides: {hydra_args}")
 
-    # Load task configuration (no IsaacLab registry)
-    task_config = load_task_config(args_cli.task or "Isaac-Velocity-Dropbear-v0")
-    task_config = apply_hydra_overrides(task_config, hydra_args)
-
-    # Override with CLI args
-    if args_cli.num_envs is not None:
-        task_config["num_envs"] = args_cli.num_envs
-    if args_cli.device is not None:
-        task_config["device"] = args_cli.device
-
-    # Determine if we have a controller sending observations
-    # Check if remote_client has a controller address (meaning RTX is running train.py)
-    import sys
-    from pathlib import Path
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-    sys.path.insert(0, str(PROJECT_ROOT))
-    import remote_client
-
-    # Get controller address from app_address field (RTX controller)
-    controller_address = None
-    if hasattr(args_cli, 'app_address') and args_cli.app_address:
-        controller_address = args_cli.app_address
-    else:
-        # Try to get from remote config
-        cfg = remote_client.get_remote_config()
-        nkn_cfg = cfg.get("nkn", {})
-        controller_address = nkn_cfg.get("app_address", "")
-
+def _build_remote_env(
+    env_cfg: RemoteEnvCfg,
+    agent_cfg: RemoteAgentCfg,
+    controller_address: Optional[str],
+) -> tuple[Any, Optional[NKNSidecar]]:
     if controller_address:
-        print("[train_remote] ========================================")
-        print("[train_remote] PRODUCTION MODE: RemoteVecEnv")
-        print(f"[train_remote] Waiting for observations from RTX controller: {controller_address}")
-        print("[train_remote] ========================================")
-
-        # Get NKN bridge
-        nkn_bridge = remote_client.get_nkn_bridge()
-        if not nkn_bridge:
-            raise RuntimeError("[train_remote] No NKN bridge available for RemoteVecEnv!")
-
-        # Create RemoteVecEnv for production training
-        from dropbear_rl_lab.remote import RemoteVecEnv
+        print(f"[train_remote] Connecting to controller at {controller_address}")
+        bridge = _start_nkn_bridge(controller_address)
         env = RemoteVecEnv(
-            num_envs=task_config.get("num_envs", 4),
-            num_obs=task_config.get("num_obs", 48),
-            num_actions=task_config.get("num_actions", 12),
-            nkn_bridge=nkn_bridge,
+            num_envs=env_cfg.scene.num_envs,
+            num_obs=env_cfg.num_obs,
+            num_actions=env_cfg.num_actions,
+            nkn_bridge=bridge,
             controller_address=controller_address,
-            device=task_config.get("device", "cuda:0"),
+            device=agent_cfg.device,
             timeout=30.0,
         )
-        print(f"[train_remote] RemoteVecEnv initialized - waiting for obs from {controller_address}")
-    else:
-        # Fallback to stub environment for testing
-        print("[train_remote] ========================================")
-        print("[train_remote] STUB MODE: No controller detected")
-        print("[train_remote] Creating stub environment (no IsaacLab imports)")
-        print("[train_remote] ========================================")
-        env = build_stub_env(
-            task_name=args_cli.task or "Isaac-Velocity-Dropbear-v0",
-            num_envs=task_config.get("num_envs", 4),
-            num_obs=task_config.get("num_obs", 48),
-            num_actions=task_config.get("num_actions", 12),
-            device=task_config.get("device", "cuda:0"),
-        )
+        return env, bridge
+    stub_env = build_stub_env(
+        task_name=env_cfg.task_name,
+        num_envs=env_cfg.scene.num_envs,
+        num_obs=env_cfg.num_obs,
+        num_actions=env_cfg.num_actions,
+        device=agent_cfg.device,
+    )
+    return stub_env, None
 
-    # Create minimal agent configuration
-    # In production, this would come from shared config or controller
-    from dataclasses import dataclass, field
-    from typing import Dict, Any
 
-    @dataclass
-    class MinimalPPOConfig:
-        """Minimal PPO configuration for remote runner."""
-        # Algorithm parameters
-        class_name: str = "PPO"
-        value_loss_coef: float = 1.0
-        use_clipped_value_loss: bool = True
-        clip_param: float = 0.2
-        entropy_coef: float = 0.01
-        num_learning_epochs: int = 5
-        num_mini_batches: int = 4
-        learning_rate: float = 1.0e-3
-        schedule: str = "adaptive"
-        gamma: float = 0.99
-        lam: float = 0.95
-        desired_kl: float = 0.01
-        max_grad_norm: float = 1.0
+def _load_controller_address() -> Optional[str]:
+    cfg = _load_connection_config()
+    nkn_cfg = cfg.get("nkn", {})
+    address = str(nkn_cfg.get("app_address") or "").strip()
+    return address or None
 
-        # Policy parameters
-        init_noise_std: float = 1.0
-        actor_hidden_dims: list = field(default_factory=lambda: [256, 256, 256])
-        critic_hidden_dims: list = field(default_factory=lambda: [256, 256, 256])
-        activation: str = "elu"
 
-        # Runner parameters
-        seed: int = 42
-        device: str = "cuda:0"
-        num_steps_per_env: int = 24
-        max_iterations: int = 1
-        empirical_normalization: bool = False
-        save_interval: int = 50
-        log_interval: int = 1
-        policy: Dict[str, Any] = field(default_factory=dict)
+parser = argparse.ArgumentParser(description="Train RL agent with RSL-RL on remote worker (no IsaacLab).")
+parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
+parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment.")
+parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
+parser.add_argument("--distributed", action="store_true", default=False, help="Run training with multiple GPUs.")
+parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on.")
+parser.add_argument("--headless", action="store_true", default=False, help="Headless mode (ignored on remote).")
+parser.add_argument("--app-address", type=str, default=None, help="Controller/app NKN address for handshake.")
+cli_args.add_rsl_rl_args(parser)
+args_cli, hydra_args = parser.parse_known_args()
 
-        def to_dict(self) -> dict:
-            """Convert to dictionary for RSL-RL."""
-            policy_dict = {
-                "class_name": "ActorCritic",
-                "init_noise_std": self.init_noise_std,
-                "actor_hidden_dims": self.actor_hidden_dims,
-                "critic_hidden_dims": self.critic_hidden_dims,
-                "activation": self.activation,
-            }
-            policy_dict.update(self.policy)
+# Reset argv so Hydra decorator sees only overrides
+sys.argv = [sys.argv[0]] + hydra_args
 
-            return {
-                "algorithm": {
-                    "class_name": self.class_name,
-                    "value_loss_coef": self.value_loss_coef,
-                    "use_clipped_value_loss": self.use_clipped_value_loss,
-                    "clip_param": self.clip_param,
-                    "entropy_coef": self.entropy_coef,
-                    "num_learning_epochs": self.num_learning_epochs,
-                    "num_mini_batches": self.num_mini_batches,
-                    "learning_rate": self.learning_rate,
-                    "schedule": self.schedule,
-                    "gamma": self.gamma,
-                    "lam": self.lam,
-                    "desired_kl": self.desired_kl,
-                    "max_grad_norm": self.max_grad_norm,
-                },
-                "policy": policy_dict,
-                "seed": self.seed,
-                "device": self.device,
-                "num_steps_per_env": self.num_steps_per_env,
-                "max_iterations": self.max_iterations,
-                "empirical_normalization": self.empirical_normalization,
-                "save_interval": self.save_interval,
-                "log_interval": self.log_interval,
-                # Required by RSL-RL OnPolicyRunner
-                "obs_groups": {},  # Empty dict for stub environment
-                "privileged_obs_groups": {},  # Empty dict for stub environment
-            }
 
-    agent_cfg = MinimalPPOConfig()
-
-    # Apply overrides from Hydra args
-    agent_dict = agent_cfg.to_dict()
-    override_config = {"agent_cfg": agent_dict}
-    override_config = apply_hydra_overrides(override_config, hydra_args)
-    agent_dict = override_config.get("agent_cfg", agent_dict)
-
-    # Override from CLI
+@hydra_task_config(args_cli.task or DEFAULT_TASK, "rsl_rl_cfg_entry_point")
+def main(env_cfg: RemoteEnvCfg, agent_cfg: RemoteAgentCfg) -> None:
+    """Train with RSL-RL agent on remote worker."""
+    if args_cli.device:
+        env_cfg.sim.device = args_cli.device
+        agent_cfg.device = args_cli.device
+    if args_cli.num_envs is not None:
+        env_cfg.scene.num_envs = args_cli.num_envs
     if args_cli.seed is not None:
-        agent_dict["seed"] = args_cli.seed
+        agent_cfg.seed = args_cli.seed
     if args_cli.max_iterations is not None:
-        agent_dict["max_iterations"] = args_cli.max_iterations
-    if args_cli.device is not None:
-        agent_dict["device"] = args_cli.device
+        agent_cfg.max_iterations = args_cli.max_iterations
+    agent_cfg.update_from_cli(args_cli)
+    env_cfg.seed = agent_cfg.seed
 
-    # Create log directory
-    experiment_name = args_cli.task or "dropbear_remote"
-    experiment_name = experiment_name.lower().replace("-", "_")
-    log_root_path = os.path.join("logs", "rsl_rl", experiment_name)
-    log_root_path = os.path.abspath(log_root_path)
-    print(f"[train_remote] Logging experiment in directory: {log_root_path}")
+    controller_address = args_cli.app_address or _load_controller_address()
+    if controller_address:
+        print("[train_remote] Running in production mode (Controller-driven observations).")
+    else:
+        print("[train_remote] Controller address not available → falling back to stub environment.")
 
-    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    if hasattr(args_cli, "run_name") and args_cli.run_name:
-        log_dir += f"_{args_cli.run_name}"
-    log_dir = os.path.join(log_root_path, log_dir)
+    log_root, log_dir = build_log_paths(agent_cfg.experiment_name, agent_cfg.run_name)
+    ensure_log_directory(log_root, log_dir)
+    print(f"[train_remote] Logging to {log_dir}")
+    _dump_run_configs(log_dir, env_cfg, agent_cfg)
 
-    # Create OnPolicyRunner
-    print("[train_remote] Creating RSL-RL OnPolicyRunner (pure tensor math)")
+    env, bridge = _build_remote_env(env_cfg, agent_cfg, controller_address)
+
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.deterministic = False
     torch.backends.cudnn.benchmark = False
 
-    runner = OnPolicyRunner(env, agent_dict, log_dir=log_dir, device=agent_dict["device"])
-
-    # Dump configuration
-    os.makedirs(os.path.join(log_dir, "params"), exist_ok=True)
-    dump_pickle_file(os.path.join(log_dir, "params", "agent.pkl"), agent_dict)
-    dump_pickle_file(os.path.join(log_dir, "params", "task.pkl"), task_config)
-
-    print(f"[train_remote] Starting training for {agent_dict['max_iterations']} iterations")
-    if controller_address:
-        print("[train_remote] PRODUCTION MODE: Training with real observations from RTX")
-    else:
-        print("[train_remote] STUB MODE: Training with zero observations (testing only)")
-
-    # Setup checkpoint transfer if we have a controller
+    runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=str(log_dir), device=agent_cfg.device)
     checkpoint_sender = None
-    if controller_address and nkn_bridge:
+    if controller_address and bridge and hasattr(env, "sequencer"):
         from checkpoint_transfer_protocol import CheckpointSender
-        checkpoint_sender = CheckpointSender(nkn_bridge, env.sequencer if hasattr(env, 'sequencer') else None)
-        print("[train_remote] Checkpoint auto-transfer enabled → RTX controller")
 
-    # Run training with checkpoint callback
-    save_interval = agent_dict.get("save_interval", 50)
+        checkpoint_sender = CheckpointSender(bridge, env.sequencer)
+        print("[train_remote] Checkpoint sender ready (controller is handling artifacts).")
 
-    for iteration in range(agent_dict["max_iterations"]):
-        # Run one iteration of training
+    save_interval = agent_cfg.save_interval
+    for iteration in range(agent_cfg.max_iterations):
         runner.learn(num_learning_iterations=1, init_at_random_ep_len=(iteration == 0))
 
-        # Check if we should save checkpoint
-        #current_it = runner.tot_iter
-        current_it = iteration + 1
-        if current_it % save_interval == 0:
-            # Save checkpoint locally
-            checkpoint_path = os.path.join(log_dir, f"model_{current_it}.pt")
-            runner.save(checkpoint_path)
+        current_iteration = iteration + 1
+        if save_interval > 0 and current_iteration % save_interval == 0:
+            checkpoint_path = log_dir / f"model_{current_iteration}.pt"
+            runner.save(str(checkpoint_path))
             print(f"[train_remote] Saved checkpoint: {checkpoint_path}")
-
-            # Transfer to controller if available
             if checkpoint_sender and controller_address:
-                print(f"[train_remote] Transferring checkpoint to RTX controller...")
-                checkpoint_id = checkpoint_sender.send_checkpoint(
-                    file_path=Path(checkpoint_path),
+                print("[train_remote] Dispatching checkpoint to controller...")
+                checkpoint_sender.send_checkpoint(
+                    file_path=checkpoint_path,
                     destination=controller_address,
-                    iteration=current_it,
+                    iteration=current_iteration,
                 )
-                print(f"[train_remote] Transfer initiated: {checkpoint_id}")
 
-    # Close environment
     env.close()
-
-    print("[train_remote] Training completed on remote worker")
-    if controller_address:
-        print("[train_remote] All checkpoints transferred to RTX controller")
-    else:
-        print("[train_remote] No controller - checkpoints remain on A100")
+    if bridge:
+        bridge.stop()
+    print("[train_remote] Remote training completed.")
 
 
 if __name__ == "__main__":

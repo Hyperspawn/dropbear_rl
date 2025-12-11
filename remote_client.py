@@ -387,6 +387,9 @@ class _NKNClient:
             queue_obj = self._make_queue(session_id)
             if queue_obj:
                 queue_obj.put({"type": "exit", "code": int(body.get("code", 0)), "session_id": session_id})
+            else:
+                exit_code = int(body.get("code", 0))
+                _remote_log(f"Remote exit (session={session_id or '<unknown>'}, code={exit_code})")
 
     def send_command(self, cmd: Iterable[str], description: Optional[str]) -> int:
         if not self.target_addr:
@@ -409,6 +412,23 @@ class _NKNClient:
             msg = queue_obj.get()
             if msg.get("type") == "exit":
                 return int(msg.get("code", 0))
+
+    def send_command_async(self, cmd: Iterable[str], description: Optional[str]) -> str:
+        """Send a command without waiting for the remote job to exit."""
+        if not self.target_addr:
+            raise RuntimeError("NKN target address not configured.")
+        if not self.ready_event.wait(timeout=30.0):
+            raise RuntimeError("NKN bridge not ready.")
+        normalized_cmd = _normalize_command(cmd)
+        session_id = str(uuid.uuid4())
+        payload = {
+            "type": "command",
+            "session_id": session_id,
+            "description": description or "remote run",
+            "cmd": normalized_cmd,
+        }
+        self.sidecar.send_dm(self.target_addr, payload)
+        return session_id
 
     def stats(self) -> Dict[str, int]:
         return {
@@ -449,6 +469,11 @@ class _NKNControl:
         if not self.client:
             raise RuntimeError("NKN client is not running.")
         return self.client.send_command(cmd, description)
+
+    def launch_command(self, cmd: Iterable[str], description: Optional[str]) -> str:
+        if not self.client:
+            raise RuntimeError("NKN client is not running.")
+        return self.client.send_command_async(cmd, description)
 
     def shutdown(self) -> None:
         if self.client:
@@ -520,6 +545,16 @@ def get_nkn_app_address() -> str:
     cfg = _load_remote_config()
     nkn_cfg = cfg.get("nkn", {})
     return str(nkn_cfg.get("app_address") or "")
+
+
+def wait_for_nkn_handshake(timeout: float = 30.0, poll: float = 0.5) -> bool:
+    """Wait until both controller and remote NKN addresses are known."""
+    start = time.time()
+    while time.time() - start < timeout:
+        if get_nkn_remote_address() and get_nkn_app_address():
+            return True
+        time.sleep(poll)
+    return False
 
 
 def get_nkn_bridge() -> Optional[NKNSidecar]:
@@ -620,6 +655,16 @@ def dispatch_remote(cmd: Iterable[str], description: Optional[str] = None) -> su
         return subprocess.CompletedProcess(args=list(normalized_cmd), returncode=exit_code)
     else:
         return _dispatch_direct(cmd, description)
+
+
+def launch_remote(cmd: Iterable[str], description: Optional[str] = None) -> str:
+    """Launch a remote command without waiting for its completion (NKN only)."""
+    cfg = _load_remote_config()
+    mode = cfg.get("mode", "direct")
+    if mode == "nkn":
+        control = ensure_nkn_client(cfg)
+        return control.launch_command(cmd, description)
+    raise RuntimeError("Asynchronous remote launch is only supported in NKN mode.")
 
 
 def test_remote_connection(host: str, port: int, timeout: float = 2.0) -> Tuple[bool, str]:

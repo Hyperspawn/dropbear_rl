@@ -107,6 +107,7 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import dropbear_rl_lab.tasks  # noqa: F401
+from dropbear_rl_lab.remote import build_log_paths, ensure_log_directory
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -138,16 +139,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env_cfg.seed = seed
         agent_cfg.seed = seed
 
-    # specify directory for logging experiments
-    log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
-    log_root_path = os.path.abspath(log_root_path)
-    print(f"[INFO] Logging experiment in directory: {log_root_path}")
-    # specify directory for logging runs: {time-stamp}_{run_name}
-    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    print(f"Exact experiment name requested from command line: {log_dir}")
-    if agent_cfg.run_name:
-        log_dir += f"_{agent_cfg.run_name}"
-    log_dir = os.path.join(log_root_path, log_dir)
+    # create consistent logging directories
+    log_root, log_dir = build_log_paths(agent_cfg.experiment_name, agent_cfg.run_name)
+    ensure_log_directory(log_root, log_dir)
+    print(f"[INFO] Logging experiment in directory: {log_root}")
+    print(f"Exact experiment name requested from command line: {log_dir.name}")
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -238,26 +234,34 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         def checkpoint_message_handler(src: str, body: dict):
             """Handle checkpoint transfer messages."""
+            if not isinstance(body, dict):
+                if original_on_message:
+                    original_on_message(src, body)
+                return
             try:
                 envelope = MessageEnvelope.from_dict(body)
-                msg_type = envelope.msg_type
-
-                if msg_type == MSG_CHECKPOINT_START:
-                    checkpoint_receiver.handle_checkpoint_start(src, envelope.payload)
-                elif msg_type == MSG_CHECKPOINT_CHUNK:
-                    checkpoint_receiver.handle_checkpoint_chunk(src, envelope.payload)
-                elif msg_type == MSG_CHECKPOINT_REQUEST_RETRY:
-                    # Forward to ControllerRemoteEnvWrapper if needed
-                    pass
-                elif msg_type == MSG_CHECKPOINT_ACK:
-                    # A100 acknowledged receipt
-                    pass
-                else:
-                    # Pass through to original handler
-                        if original_on_message:
-                            original_on_message(src, body)
             except Exception as e:
-                print(f"[train.py] Error handling message: {e}")
+                print(f"[train.py] Error parsing checkpoint envelope: {e}")
+                if original_on_message:
+                    original_on_message(src, body)
+                return
+            msg_type = getattr(envelope, "msg_type", None)
+            if not msg_type:
+                if original_on_message:
+                    original_on_message(src, body)
+                return
+
+            if msg_type == MSG_CHECKPOINT_START:
+                checkpoint_receiver.handle_checkpoint_start(src, envelope.payload)
+            elif msg_type == MSG_CHECKPOINT_CHUNK:
+                checkpoint_receiver.handle_checkpoint_chunk(src, envelope.payload)
+            elif msg_type == MSG_CHECKPOINT_REQUEST_RETRY:
+                # Forward to ControllerRemoteEnvWrapper if needed
+                pass
+            elif msg_type == MSG_CHECKPOINT_ACK:
+                # A100 acknowledged receipt
+                pass
+            else:
                 if original_on_message:
                     original_on_message(src, body)
 
@@ -267,7 +271,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print("[train.py] Local mode: simulation and policy both on RTX")
 
     # create runner from rsl-rl
-    runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+    runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=str(log_dir), device=agent_cfg.device)
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     # load the checkpoint

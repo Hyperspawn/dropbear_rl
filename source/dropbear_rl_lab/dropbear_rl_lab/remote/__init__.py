@@ -10,12 +10,26 @@ on remote A100 workers without IsaacLab dependencies.
 """
 
 from .env_builder import build_stub_env
-from .config_helpers import load_task_config, apply_hydra_overrides
+from .config_helpers import (
+    RemoteAgentCfg,
+    RemoteEnvCfg,
+    apply_hydra_overrides,
+    hydra_task_config,
+    load_task_config,
+)
+from .logging_utils import build_log_paths, dump_json_file, dump_pickle_file, ensure_log_directory
 from .remote_vec_env import RemoteVecEnv
 
 __all__ = [
     "build_stub_env",
+    "RemoteVecEnv",
     "load_task_config",
     "apply_hydra_overrides",
-    "RemoteVecEnv",
+    "hydra_task_config",
+    "RemoteEnvCfg",
+    "RemoteAgentCfg",
+    "build_log_paths",
+    "ensure_log_directory",
+    "dump_json_file",
+    "dump_pickle_file",
 ]

@@ -1726,7 +1726,12 @@ def main() -> int:
 
                 remote_cmd = ["python", str(remote_script_rel)] + remote_train_args
                 cfg = remote_client.get_remote_config()
+                target = ""
+                remote_addr = ""
+                controller_addr = ""
                 if cfg.get("mode") == "nkn":
+                    if not remote_client.wait_for_nkn_handshake(timeout=30.0):
+                        raise RuntimeError("NKN handshake incomplete; wait for the remote agent to connect.")
                     target = remote_client.get_nkn_target()
                     remote_addr = remote_client.get_nkn_remote_address()
                     controller_addr = remote_client.get_nkn_app_address()
@@ -1742,7 +1747,13 @@ def main() -> int:
 
                 print("[i] Step 1: Dispatching train_remote.py to A100 worker...")
                 print(f"[i] A100 will run: {' '.join(remote_cmd)}")
-                remote_client.dispatch_remote(remote_cmd, description="dropbear_train_remote")
+                session_id = None
+                try:
+                    session_id = remote_client.launch_remote(remote_cmd, description="dropbear_train_remote")
+                    print(f"[i] Remote job launched (session {session_id})")
+                except RuntimeError as exc:
+                    print(f"[i] Async launch failed: {exc}; falling back to blocking dispatch.")
+                    remote_client.dispatch_remote(remote_cmd, description="dropbear_train_remote")
 
                 # Now run train.py locally on RTX controller with IsaacLab simulation
                 print("[i] Step 2: Running train.py locally on RTX with IsaacLab...")

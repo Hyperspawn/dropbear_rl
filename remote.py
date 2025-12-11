@@ -15,7 +15,7 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 try:
     import curses
@@ -43,6 +43,7 @@ from app import (
 from nkn_sidecar import NKNSidecar
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+REMOTE_CONFIG_FILE = PROJECT_ROOT / "isaaclab_remote_connection.json"
 REMOTE_VENV_NAME = "env_remote"
 REMOTE_VENV_DIR = PROJECT_ROOT / REMOTE_VENV_NAME
 REMOTE_MARKER = REMOTE_VENV_DIR / ".remote_bootstrap_ok"
@@ -96,17 +97,39 @@ def _save_persistent_seed(seed: str) -> None:
         pass
 
 
-def _load_controller_address_from_config() -> str:
+def _read_connection_config() -> Dict[str, Any]:
+    if not REMOTE_CONFIG_FILE.exists():
+        return {}
     try:
-        config = PROJECT_ROOT / "isaaclab_remote_connection.json"
-        if not config.exists():
-            return ""
-        payload = json.loads(config.read_text(encoding="utf-8"))
-        nkn_cfg = payload.get("nkn", {})
-        address = nkn_cfg.get("app_address") or ""
-        return str(address).strip()
+        payload = json.loads(REMOTE_CONFIG_FILE.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return payload
     except Exception:
-        return ""
+        pass
+    return {}
+
+
+def _write_connection_config(config: Dict[str, Any]) -> None:
+    try:
+        REMOTE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        REMOTE_CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"[remote] Failed to persist connection config: {exc}")
+
+
+def _update_connection_config(**kwargs: Any) -> None:
+    config = _read_connection_config()
+    nkn_cfg = config.setdefault("nkn", {})
+    for key, value in kwargs.items():
+        if value is None:
+            continue
+        nkn_cfg[key] = value
+    _write_connection_config(config)
+
+
+def _load_controller_address_from_config() -> str:
+    nkn_cfg = _read_connection_config().get("nkn", {})
+    return str(nkn_cfg.get("app_address") or "").strip()
 
 
 def _stream_command(
@@ -457,6 +480,14 @@ class NKNRemoteAgent:
             try:
                 self.bridge.send_dm(self.controller_address, payload)
                 self._log(f"[remote] Sent handshake to controller at {self.controller_address}")
+                _update_connection_config(
+                    remote_address=addr,
+                    target=addr,
+                    app_address=self.controller_address,
+                    seed=self.bridge.seed_hex,
+                    identifier=self.bridge.identifier,
+                    num_subclients=self.bridge.num_subclients,
+                )
                 self._handshake_sent = True
             except Exception as exc:  # pragma: no cover
                 self._log(f"[remote] Failed to send handshake: {exc}")
@@ -465,6 +496,7 @@ class NKNRemoteAgent:
         self._log(f"[remote] NKN bridge ready at {address}")
         self.display.set_address(address)
         self.display.set_status("bridge ready")
+        _update_connection_config(remote_address=address)
         self._send_handshake()
 
     def _on_status(self, message: str) -> None:
@@ -501,11 +533,24 @@ class NKNRemoteAgent:
             self.bridge.send_dm(src, payload)
 
         self._send_handshake()
-        send({"type": "ack", "message": "Remote agent ready and awaiting commands."})
         cmd = body.get("cmd")
         if not isinstance(cmd, list):
             send({"type": "error", "message": "Invalid command payload."})
             return
+        cmd_lower = " ".join(str(part).lower() for part in cmd)
+        if "train_remote.py" in cmd_lower:
+            controller_addr = _load_controller_address_from_config()
+            if not controller_addr:
+                message = "Controller address missing in isaaclab_remote_connection.json."
+                self._log(f"[remote] {message}")
+                send({"type": "error", "message": message})
+                return
+            if not self.bridge.wait_ready(timeout=10.0):
+                message = "NKNSidecar not ready for remote training."
+                self._log(f"[remote] {message}")
+                send({"type": "error", "message": message})
+                return
+        send({"type": "ack", "message": "Remote agent ready and awaiting commands."})
         description = body.get("description") or "remote run"
         preview_parts = " ".join(str(part) for part in cmd[:4])
         if len(cmd) > 4:
@@ -542,6 +587,14 @@ def main() -> None:
     _save_persistent_seed(seed)
 
     controller_address = args.app_address.strip() or _load_controller_address_from_config()
+    updates: Dict[str, Any] = {
+        "seed": seed,
+        "identifier": args.nkn_identifier,
+        "num_subclients": args.nkn_num_subclients,
+    }
+    if controller_address:
+        updates["app_address"] = controller_address
+    _update_connection_config(**updates)
     agent = NKNRemoteAgent(
         seed_hex=seed,
         identifier=args.nkn_identifier,
