@@ -131,6 +131,8 @@ def main():
         num_steps_per_env: int = 24
         max_iterations: int = 1
         empirical_normalization: bool = False
+        save_interval: int = 50
+        log_interval: int = 1
         policy: Dict[str, Any] = field(default_factory=dict)
 
         def to_dict(self) -> dict:
@@ -166,6 +168,8 @@ def main():
                 "num_steps_per_env": self.num_steps_per_env,
                 "max_iterations": self.max_iterations,
                 "empirical_normalization": self.empirical_normalization,
+                "save_interval": self.save_interval,
+                "log_interval": self.log_interval,
                 # Required by RSL-RL OnPolicyRunner
                 "obs_groups": {},  # Empty dict for stub environment
                 "privileged_obs_groups": {},  # Empty dict for stub environment
