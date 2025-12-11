@@ -71,22 +71,16 @@ class ControllerRemoteEnvWrapper:
         print(f"[controller_env] DEBUG: Received message from {src}", flush=True)
         print(f"[controller_env] DEBUG: Expected worker: {self.worker_address}", flush=True)
 
-        # Only process action messages from our worker
-        if src != self.worker_address:
-            print(f"[controller_env] DEBUG: Ignoring message from non-worker {src}", flush=True)
-            if self._original_on_message:
-                self._original_on_message(src, body)
-            return
-
         try:
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
             print(f"[controller_env] DEBUG: Processed message type: {processed.msg_type if processed else 'None'}", flush=True)
 
             if processed and processed.msg_type == MSG_ACTION_BATCH:
-                # Queue action message
                 self.action_queue.put(processed, block=False)
                 print(f"[controller_env] ✓ Received actions for step {processed.payload['step_id']}", flush=True)
+            elif self._original_on_message:
+                self._original_on_message(src, body)
 
         except Exception as e:
             print(f"[controller_env] ✗ Error processing message: {e}", flush=True)

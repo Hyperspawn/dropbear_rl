@@ -137,23 +137,17 @@ class RemoteVecEnv:
         print(f"[remote_env] DEBUG: Expected controller: {self.controller_address}", flush=True)
         print(f"[remote_env] DEBUG: My NKN address: {self.nkn_bridge.address}", flush=True)
 
-        # Only process messages from controller
-        if src != self.controller_address:
-            print(f"[remote_env] DEBUG: Ignoring message from non-controller {src}", flush=True)
-            # Pass to original handler
-            if self._original_on_message:
-                self._original_on_message(src, body)
-            return
-
         try:
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
             print(f"[remote_env] DEBUG: Processed message type: {processed.msg_type if processed else 'None'}", flush=True)
 
             if processed and processed.msg_type == MSG_OBS_BATCH:
-                # Queue observation message
                 self.obs_queue.put(processed, block=False)
                 print(f"[remote_env] ✓ Received obs for step {processed.payload.get('step_id', '?')}", flush=True)
+            elif self._original_on_message:
+                # Let other observers handle this message
+                self._original_on_message(src, body)
 
         except Exception as e:
             print(f"[remote_env] ✗ Error processing message: {e}", flush=True)
