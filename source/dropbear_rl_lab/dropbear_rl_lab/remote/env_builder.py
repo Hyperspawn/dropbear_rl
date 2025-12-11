@@ -32,6 +32,13 @@ class StubVecEnv:
         self.num_obs = num_obs
         self.num_actions = num_actions
 
+        # Minimal config dict required by RSL-RL
+        self.cfg = {
+            "num_envs": num_envs,
+            "num_observations": num_obs,
+            "num_actions": num_actions,
+        }
+
         # Auto-select best available GPU or fall back to CPU
         selected_device = device
         if torch.cuda.is_available():
