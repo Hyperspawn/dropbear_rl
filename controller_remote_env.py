@@ -70,8 +70,8 @@ class ControllerRemoteEnvWrapper:
         """Handle incoming network messages."""
         # Only process action messages from our worker
         if src != self.worker_address:
-                    if self._original_on_message:
-                        self._original_on_message(src, body)
+            if self._original_on_message:
+                self._original_on_message(src, body)
             return
 
         try:
