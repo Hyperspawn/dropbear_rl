@@ -1708,17 +1708,16 @@ def main() -> int:
                 print("[i] A100 Worker: Running policy inference (train_remote.py)")
                 print("[i] ========================================")
 
-                # Remote-friendly defaults (can be overridden by CLI/Hydra)
-                default_remote_envs = 16
-                default_steps_per_env = 256
-                default_learning_epochs = 8
-                default_mini_batches = 8
+                # Remote-heavy defaults to exercise A100 (last wins even if user passed smaller values)
+                heavy_remote_envs = 64
+                heavy_steps_per_env = 512
+                heavy_learning_epochs = 10
+                heavy_mini_batches = 16
+                heavy_hidden_dims = "[512,512,512]"
 
-                def _ensure_override(arg_list: List[str], prefix: str, value: object) -> None:
-                    """Append override if no existing entry matches the prefix."""
-                    if any(str(item).startswith(prefix) for item in arg_list):
-                        return
-                    arg_list.append(f"{prefix}{value}")
+                def _force_override(arg_list: List[str], key: str, value: object) -> None:
+                    """Force an override by appending at the end (Hydra last-one-wins)."""
+                    arg_list.append(f"{key}{value}")
 
                 # First, dispatch train_remote.py to A100 worker (non-blocking)
                 remote_script_rel = Path("scripts") / "rsl_rl" / "train_remote.py"
@@ -1737,13 +1736,15 @@ def main() -> int:
                 if args.headless and "--headless" not in unknown:
                     remote_train_args.append("--headless")
 
-                # Apply remote defaults unless already provided
-                _ensure_override(remote_train_args + unknown, "--num_envs=", default_remote_envs)
-                _ensure_override(remote_train_args + unknown, "+agent_cfg.num_steps_per_env=", default_steps_per_env)
-                _ensure_override(remote_train_args + unknown, "+agent_cfg.algorithm.num_learning_epochs=", default_learning_epochs)
-                _ensure_override(remote_train_args + unknown, "+agent_cfg.algorithm.num_mini_batches=", default_mini_batches)
-
                 remote_train_args += unknown
+                # Force heavy overrides at the end so they win
+                _force_override(remote_train_args, "--num_envs=", heavy_remote_envs)
+                _force_override(remote_train_args, "+agent_cfg.num_steps_per_env=", heavy_steps_per_env)
+                _force_override(remote_train_args, "+agent_cfg.algorithm.num_learning_epochs=", heavy_learning_epochs)
+                _force_override(remote_train_args, "+agent_cfg.algorithm.num_mini_batches=", heavy_mini_batches)
+                _force_override(remote_train_args, "+agent_cfg.policy.actor_hidden_dims=", heavy_hidden_dims)
+                _force_override(remote_train_args, "+agent_cfg.policy.critic_hidden_dims=", heavy_hidden_dims)
+
                 if "--headless" not in remote_train_args:
                     remote_train_args.append("--headless")
 
@@ -1790,18 +1791,20 @@ def main() -> int:
                 if args.headless and "--headless" not in unknown:
                     train_args.append("--headless")
 
-                # Mirror remote defaults on the controller side for consistency
-                _ensure_override(train_args + unknown, "--num_envs=", default_remote_envs)
-                _ensure_override(train_args + unknown, "+agent_cfg.num_steps_per_env=", default_steps_per_env)
-                _ensure_override(train_args + unknown, "+agent_cfg.algorithm.num_learning_epochs=", default_learning_epochs)
-                _ensure_override(train_args + unknown, "+agent_cfg.algorithm.num_mini_batches=", default_mini_batches)
-
                 # Pass worker address to train.py (train.py runs in Isaac Sim environment)
                 if remote_addr:
                     train_args.append(f"--remote_worker_address={remote_addr}")
                     print(f"[i] Passing worker address to train.py: {remote_addr}")
 
                 train_args += unknown
+                # Force heavy overrides on controller to keep shapes/counts aligned
+                _force_override(train_args, "--num_envs=", heavy_remote_envs)
+                _force_override(train_args, "+agent_cfg.num_steps_per_env=", heavy_steps_per_env)
+                _force_override(train_args, "+agent_cfg.algorithm.num_learning_epochs=", heavy_learning_epochs)
+                _force_override(train_args, "+agent_cfg.algorithm.num_mini_batches=", heavy_mini_batches)
+                _force_override(train_args, "+agent_cfg.policy.actor_hidden_dims=", heavy_hidden_dims)
+                _force_override(train_args, "+agent_cfg.policy.critic_hidden_dims=", heavy_hidden_dims)
+
                 cmd = base_cmd + [script_path] + train_args
                 print(f"[i] RTX will run: {' '.join(cmd)}")
                 print("[i] RTX sends obs → A100 computes actions → RTX applies to sim")
