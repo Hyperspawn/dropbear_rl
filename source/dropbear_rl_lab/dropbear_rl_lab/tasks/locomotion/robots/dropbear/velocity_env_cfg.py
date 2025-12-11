@@ -376,6 +376,11 @@ class TerminationsCfg:
             "threshold": 1.0,
         },
     )
+    # Terminate on excessive torso tilt to prevent tumbles flinging bots away
+    base_tilt = DoneTerm(
+        func=mdp.bad_orientation,
+        params={"limit_angle": 0.6, "asset_cfg": SceneEntityCfg("robot")},  # ~34 degrees
+    )
 
 
 @configclass
