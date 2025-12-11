@@ -123,7 +123,8 @@ def _load_controller_address(wait_for_train_address: bool = True) -> Optional[st
     # If we should wait for train_address, poll the config file
     if wait_for_train_address:
         print("[train_remote] Waiting for train.py to publish its NKN address...")
-        for attempt in range(20):  # 20 attempts * 0.5s = 10s max
+        print("[train_remote] (This can take 15-20s while Isaac Sim starts up...)")
+        for attempt in range(60):  # 60 attempts * 0.5s = 30s max (Isaac Sim startup time)
             cfg = _load_connection_config()
             nkn_cfg = cfg.get("nkn", {})
             train_addr = str(nkn_cfg.get("train_address") or "").strip()
@@ -132,9 +133,13 @@ def _load_controller_address(wait_for_train_address: bool = True) -> Optional[st
                 print(f"[train_remote] ✓ Found train_address: {train_addr}")
                 return train_addr
 
+            if attempt % 10 == 0 and attempt > 0:
+                print(f"[train_remote] Still waiting... ({attempt * 0.5:.0f}s elapsed)")
+
             time.sleep(0.5)
 
-        print("[train_remote] ⚠ Timeout waiting for train_address, falling back to app_address")
+        print("[train_remote] ⚠ Timeout waiting for train_address (30s), falling back to app_address")
+        print("[train_remote] ⚠ This may cause address conflicts!")
 
     # Load without waiting (or after timeout)
     cfg = _load_connection_config()
