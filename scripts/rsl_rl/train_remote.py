@@ -301,6 +301,9 @@ def main(provided_sidecar=None, argv=None):
     if args_cli.device is not None:
         agent_dict["device"] = args_cli.device
 
+    # Align agent/device with the selected env device (e.g., cuda:best_gpu)
+    agent_dict["device"] = str(env.device)
+
     # Create log directory
     experiment_name = args_cli.task or "dropbear_remote"
     experiment_name = experiment_name.lower().replace("-", "_")

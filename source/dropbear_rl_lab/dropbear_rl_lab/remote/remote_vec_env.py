@@ -91,6 +91,10 @@ class RemoteVecEnv:
                 selected_device = f"cuda:{best_gpu}"
                 gpu_name = torch.cuda.get_device_name(best_gpu)
                 print(f"[remote_env] Selected GPU {best_gpu}: {gpu_name}")
+                try:
+                    torch.cuda.set_device(best_gpu)
+                except Exception:
+                    pass
             else:
                 print(f"[remote_env] No compatible GPU (need >= 7.0), using CPU")
                 selected_device = "cpu"
@@ -118,6 +122,7 @@ class RemoteVecEnv:
         self.sequencer = MessageSequencer()
         self.obs_queue: queue.Queue[MessageEnvelope] = queue.Queue(maxsize=100)
         self.step_counter = 0
+        self._log_every = 50
 
         # Current state
         self._current_obs: Optional[Dict[str, torch.Tensor]] = None
@@ -164,11 +169,13 @@ class RemoteVecEnv:
                 if expected and not src.startswith(expected):
                     print(f"[remote_env] Dropping obs from {src}; expected {expected}")
                     return
-                print(f"[remote_env] Received obs message from {src}")
+                if processed.payload.get("step_id", 0) % self._log_every == 0:
+                    print(f"[remote_env] Received obs message from {src}")
                 self.obs_queue.put(processed, block=False)
                 try:
                     step_id = processed.payload.get("step_id")
-                    print(f"[remote_env] Received obs batch for step {step_id}")
+                    if step_id % self._log_every == 0:
+                        print(f"[remote_env] Received obs batch for step {step_id}")
                 except Exception:
                     pass
 
@@ -179,7 +186,8 @@ class RemoteVecEnv:
                 try:
                     ack = create_action_ack_message(self.sequencer, processed.payload.get("step_id", 0))
                     self.nkn_bridge.send_dm(self.controller_address or src, ack.to_dict())
-                    print(f"[remote_env] Acked action request for step {processed.payload.get('step_id')}")
+                    if processed.payload.get("step_id", 0) % self._log_every == 0:
+                        print(f"[remote_env] Acked action request for step {processed.payload.get('step_id')}")
                 except Exception as exc:
                     print(f"[remote_env] Failed to send action ack: {exc}")
                 return

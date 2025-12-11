@@ -1708,6 +1708,18 @@ def main() -> int:
                 print("[i] A100 Worker: Running policy inference (train_remote.py)")
                 print("[i] ========================================")
 
+                # Remote-friendly defaults (can be overridden by CLI/Hydra)
+                default_remote_envs = 32
+                default_steps_per_env = 64
+                default_learning_epochs = 4
+                default_mini_batches = 8
+
+                def _ensure_override(arg_list: List[str], prefix: str, value: object) -> None:
+                    """Append override if no existing entry matches the prefix."""
+                    if any(str(item).startswith(prefix) for item in arg_list):
+                        return
+                    arg_list.append(f"{prefix}{value}")
+
                 # First, dispatch train_remote.py to A100 worker (non-blocking)
                 remote_script_rel = Path("scripts") / "rsl_rl" / "train_remote.py"
                 remote_train_args: List[str] = [
@@ -1724,6 +1736,13 @@ def main() -> int:
                     remote_train_args.append(f"--video_length={args.dropbear_video_length}")
                 if args.headless and "--headless" not in unknown:
                     remote_train_args.append("--headless")
+
+                # Apply remote defaults unless already provided
+                _ensure_override(remote_train_args + unknown, "--num_envs=", default_remote_envs)
+                _ensure_override(remote_train_args + unknown, "+agent_cfg.num_steps_per_env=", default_steps_per_env)
+                _ensure_override(remote_train_args + unknown, "+agent_cfg.algorithm.num_learning_epochs=", default_learning_epochs)
+                _ensure_override(remote_train_args + unknown, "+agent_cfg.algorithm.num_mini_batches=", default_mini_batches)
+
                 remote_train_args += unknown
                 if "--headless" not in remote_train_args:
                     remote_train_args.append("--headless")
@@ -1770,6 +1789,12 @@ def main() -> int:
                     train_args.append(f"--video_length={args.dropbear_video_length}")
                 if args.headless and "--headless" not in unknown:
                     train_args.append("--headless")
+
+                # Mirror remote defaults on the controller side for consistency
+                _ensure_override(train_args + unknown, "--num_envs=", default_remote_envs)
+                _ensure_override(train_args + unknown, "+agent_cfg.num_steps_per_env=", default_steps_per_env)
+                _ensure_override(train_args + unknown, "+agent_cfg.algorithm.num_learning_epochs=", default_learning_epochs)
+                _ensure_override(train_args + unknown, "+agent_cfg.algorithm.num_mini_batches=", default_mini_batches)
 
                 # Pass worker address to train.py (train.py runs in Isaac Sim environment)
                 if remote_addr:
