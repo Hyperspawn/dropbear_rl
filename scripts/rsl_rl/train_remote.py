@@ -307,6 +307,13 @@ def main():
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.deterministic = False
     torch.backends.cudnn.benchmark = False
+    # Ensure initial observations are available before constructing the runner
+    try:
+        env.reset()
+        print("[train_remote] Initial observations received from controller.")
+    except Exception as exc:
+        print(f"[train_remote] Failed to receive initial observations: {exc}")
+        raise
 
     runner = OnPolicyRunner(env, agent_dict, log_dir=log_dir, device=agent_dict["device"])
 
