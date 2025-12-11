@@ -1746,7 +1746,13 @@ def main() -> int:
 
                 print("[i] Step 1: Dispatching train_remote.py to A100 worker...")
                 print(f"[i] A100 will run: {' '.join(remote_cmd)}")
-                remote_client.dispatch_remote(remote_cmd, description="dropbear_train_remote")
+                def _dispatch_remote_worker() -> None:
+                    try:
+                        remote_client.dispatch_remote(remote_cmd, description="dropbear_train_remote")
+                    except Exception as exc:
+                        print(f"[!] Remote worker command failed: {exc}")
+
+                threading.Thread(target=_dispatch_remote_worker, name="dropbear-remote-dispatch", daemon=True).start()
 
                 # Now run train.py locally on RTX controller with IsaacLab simulation
                 print("[i] Step 2: Running train.py locally on RTX with IsaacLab...")

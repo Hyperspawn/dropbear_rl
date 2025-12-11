@@ -60,6 +60,12 @@ def _load_remote_config() -> Dict[str, object]:
         except Exception:
             pass
     _ensure_nkn_config(data)
+    # sanitize addresses on load
+    nkn_cfg = data.get("nkn", {})
+    if isinstance(nkn_cfg, dict):
+        for key in ("target", "remote_address", "app_address", "identifier"):
+            if key in nkn_cfg:
+                nkn_cfg[key] = _normalize_nkn_address(nkn_cfg.get(key))
     _remote_config_cache = data
     return data
 
@@ -71,6 +77,14 @@ def _ensure_nkn_config(cfg: Dict[str, object]) -> None:
     if isinstance(raw, dict):
         merged.update(raw)
     cfg["nkn"] = merged
+
+
+def _normalize_nkn_address(value: object) -> str:
+    addr = str(value or "").strip()
+    # strip trailing slashes/backslashes that can sneak in from copy/paste
+    while addr.endswith(("\\", "/")):
+        addr = addr[:-1]
+    return addr
 
 
 def _ensure_nkn_seed(cfg: Dict[str, object]) -> None:
@@ -102,6 +116,10 @@ def save_remote_config(config: Dict[str, object]) -> None:
     merged_nkn: Dict[str, object] = dict(DEFAULT_REMOTE_CONFIG["nkn"])
     if isinstance(nkn_overrides, dict):
         merged_nkn.update(nkn_overrides)
+    # sanitize addresses
+    for key in ("target", "remote_address", "app_address", "identifier"):
+        if key in merged_nkn:
+            merged_nkn[key] = _normalize_nkn_address(merged_nkn[key])
     data["nkn"] = merged_nkn
     if "port" in data:
         try:
@@ -406,7 +424,10 @@ class _NKNClient:
         }
         self.sidecar.send_dm(self.target_addr, payload)
         while True:
-            msg = queue_obj.get()
+            try:
+                msg = queue_obj.get(timeout=30.0)
+            except queue.Empty:
+                raise RuntimeError("Timed out waiting for remote command response.")
             if msg.get("type") == "exit":
                 return int(msg.get("code", 0))
 
@@ -435,11 +456,11 @@ class _NKNControl:
     def _make_key(self, cfg: Dict[str, object]) -> tuple:
         nkn = cfg.get("nkn", {})
         return (
-            str(nkn.get("seed", "")),
-            str(nkn.get("identifier", "")),
-            str(nkn.get("target", "")),
+            _normalize_nkn_address(nkn.get("seed", "")),
+            _normalize_nkn_address(nkn.get("identifier", "")),
+            _normalize_nkn_address(nkn.get("target", "")),
             str(nkn.get("num_subclients", "2")),
-            str(nkn.get("seed_ws", "")),
+            _normalize_nkn_address(nkn.get("seed_ws", "")),
         )
 
     def matches(self, cfg: Dict[str, object]) -> bool:
@@ -503,23 +524,23 @@ def get_nkn_stats() -> Dict[str, int]:
 def get_nkn_target() -> str:
     cfg = _load_remote_config()
     nkn_cfg = cfg.get("nkn", {})
-    return str(nkn_cfg.get("target") or "")
+    return _normalize_nkn_address(nkn_cfg.get("target"))
 
 
 def get_nkn_remote_address() -> str:
     cfg = _load_remote_config()
     nkn_cfg = cfg.get("nkn", {})
-    return str(nkn_cfg.get("remote_address") or "")
+    return _normalize_nkn_address(nkn_cfg.get("remote_address"))
 
 
 def get_nkn_app_address() -> str:
     if _nkn_control and _nkn_control.client:
         addr = _nkn_control.client.app_address
         if addr:
-            return addr
+            return _normalize_nkn_address(addr)
     cfg = _load_remote_config()
     nkn_cfg = cfg.get("nkn", {})
-    return str(nkn_cfg.get("app_address") or "")
+    return _normalize_nkn_address(nkn_cfg.get("app_address"))
 
 
 def get_nkn_bridge() -> Optional[NKNSidecar]:

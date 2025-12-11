@@ -223,7 +223,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             base_env=env,
             nkn_bridge=nkn_bridge,
             worker_address=worker_address,
-            timeout=30.0,
+            timeout=120.0,
         )
         print("[train.py] Environment wrapped - simulation local, policy remote!")
 
