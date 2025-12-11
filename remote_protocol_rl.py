@@ -71,6 +71,8 @@ class MessageSequencer:
     def __init__(self):
         self.next_seq = 0
         self.received_msgs: Dict[str, float] = {}  # msg_id -> timestamp
+        # We keep a monotonic watermark but do not block on gaps; NKN can drop
+        # heartbeats and strict ordering caused deadlocks when any packet was lost.
         self.expected_seq = 0
         self.out_of_order_buffer: Dict[int, MessageEnvelope] = {}
 
@@ -98,7 +100,7 @@ class MessageSequencer:
         """Process incoming message with dedup and ordering.
 
         Returns:
-            Message if valid and in-order, None if duplicate or out-of-order
+            Message if valid and not a recent duplicate, otherwise None.
         """
         # Deduplication check
         if msg.msg_id in self.received_msgs:
@@ -115,28 +117,10 @@ class MessageSequencer:
             mid: ts for mid, ts in self.received_msgs.items() if ts > cutoff
         }
 
-        # Ordering check
-        if msg.sequence == self.expected_seq:
-            # In-order message
-            self.expected_seq += 1
-
-            # Check if buffered messages are now ready
-            while self.expected_seq in self.out_of_order_buffer:
-                buffered = self.out_of_order_buffer.pop(self.expected_seq)
-                self.expected_seq += 1
-                # Note: In production, yield buffered messages too
-                # For now, just advance expected_seq
-
-            return msg
-
-        elif msg.sequence > self.expected_seq:
-            # Out-of-order, buffer it
-            self.out_of_order_buffer[msg.sequence] = msg
-            return None
-
-        else:
-            # Old message (seq < expected), ignore
-            return None
+        # Lenient ordering: advance watermark and accept message.
+        if msg.sequence >= self.expected_seq:
+            self.expected_seq = msg.sequence + 1
+        return msg
 
     def _generate_msg_id(self, msg_type: str, payload: Dict[str, Any]) -> str:
         """Generate unique message ID based on content."""
