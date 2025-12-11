@@ -1702,34 +1702,29 @@ def main() -> int:
         elif args.run == "dropbear_train":
             # Determine which script to use based on remote mode
             if remote_client.is_remote_enabled():
-                # Use train_remote.py for remote A100 workers (no IsaacLab)
-                script_rel = Path("scripts") / "rsl_rl" / "train_remote.py"
-                print("[i] Remote mode active: dispatching train_remote.py to tensor workers")
-                print("[i] train_remote.py runs IsaacLab-free on A100 workers")
-            else:
-                # Use train.py for local RTX controller (with IsaacLab)
-                script_rel = Path("scripts") / "rsl_rl" / "train.py"
-                print("[i] Local mode: running train.py with IsaacLab on RTX")
+                print("[i] ========================================")
+                print("[i] REMOTE TRAINING MODE")
+                print("[i] RTX Controller: Running IsaacLab simulation (train.py)")
+                print("[i] A100 Worker: Running policy inference (train_remote.py)")
+                print("[i] ========================================")
 
-            script_path = str(PROJECT_ROOT / script_rel)
-            train_args: List[str] = [
-                f"--task={args.dropbear_task}",
-                f"--max_iterations={args.dropbear_max_iterations}",
-            ]
-            if args.dropbear_video:
-                train_args.append("--video")
-            if args.dropbear_video_interval is not None:
-                train_args.append(f"--video_interval={args.dropbear_video_interval}")
-            if args.dropbear_video_length is not None:
-                train_args.append(f"--video_length={args.dropbear_video_length}")
-            if args.headless and "--headless" not in unknown:
-                train_args.append("--headless")
-            train_args += unknown
-            if remote_client.is_remote_enabled() and "--headless" not in train_args:
-                train_args.append("--headless")
-            cmd = base_cmd + [script_path] + train_args
-            if remote_client.is_remote_enabled():
-                remote_cmd = ["python", str(script_rel)] + train_args
+                # First, dispatch train_remote.py to A100 worker (non-blocking)
+                remote_script_rel = Path("scripts") / "rsl_rl" / "train_remote.py"
+                remote_train_args: List[str] = [
+                    f"--task={args.dropbear_task}",
+                    f"--max_iterations={args.dropbear_max_iterations}",
+                ]
+                if args.dropbear_video_interval is not None:
+                    remote_train_args.append(f"--video_interval={args.dropbear_video_interval}")
+                if args.dropbear_video_length is not None:
+                    remote_train_args.append(f"--video_length={args.dropbear_video_length}")
+                if args.headless and "--headless" not in unknown:
+                    remote_train_args.append("--headless")
+                remote_train_args += unknown
+                if "--headless" not in remote_train_args:
+                    remote_train_args.append("--headless")
+
+                remote_cmd = ["python", str(remote_script_rel)] + remote_train_args
                 cfg = remote_client.get_remote_config()
                 if cfg.get("mode") == "nkn":
                     target = remote_client.get_nkn_target()
@@ -1741,12 +1736,55 @@ def main() -> int:
                     else:
                         print("[i] Controller NKN address pending sidecar readiness.")
                     if remote_addr:
-                        print(f"[i] Remote agent reported address: {remote_addr}")
+                        print(f"[i] A100 worker address: {remote_addr}")
                     else:
                         print("[i] Remote agent address pending handshake.")
-                    print("[i] Remote worker will execute train_remote.py (no IsaacLab imports)")
-                remote_client.dispatch_remote(remote_cmd, description="dropbear_train")
+
+                print("[i] Step 1: Dispatching train_remote.py to A100 worker...")
+                print(f"[i] A100 will run: {' '.join(remote_cmd)}")
+                remote_client.dispatch_remote(remote_cmd, description="dropbear_train_remote")
+
+                # Now run train.py locally on RTX controller with IsaacLab simulation
+                print("[i] Step 2: Running train.py locally on RTX with IsaacLab...")
+                script_rel = Path("scripts") / "rsl_rl" / "train.py"
+                script_path = str(PROJECT_ROOT / script_rel)
+                train_args: List[str] = [
+                    f"--task={args.dropbear_task}",
+                    f"--max_iterations={args.dropbear_max_iterations}",
+                ]
+                if args.dropbear_video:
+                    train_args.append("--video")
+                if args.dropbear_video_interval is not None:
+                    train_args.append(f"--video_interval={args.dropbear_video_interval}")
+                if args.dropbear_video_length is not None:
+                    train_args.append(f"--video_length={args.dropbear_video_length}")
+                if args.headless and "--headless" not in unknown:
+                    train_args.append("--headless")
+                train_args += unknown
+                cmd = base_cmd + [script_path] + train_args
+                print(f"[i] RTX will run: {' '.join(cmd)}")
+                print("[i] RTX sends obs → A100 computes actions → RTX applies to sim")
+                run_cmd(cmd, cwd=repo_dir, env=run_env)
             else:
+                # Use train.py for local RTX controller (with IsaacLab)
+                script_rel = Path("scripts") / "rsl_rl" / "train.py"
+                print("[i] Local mode: running train.py with IsaacLab on RTX")
+
+                script_path = str(PROJECT_ROOT / script_rel)
+                train_args: List[str] = [
+                    f"--task={args.dropbear_task}",
+                    f"--max_iterations={args.dropbear_max_iterations}",
+                ]
+                if args.dropbear_video:
+                    train_args.append("--video")
+                if args.dropbear_video_interval is not None:
+                    train_args.append(f"--video_interval={args.dropbear_video_interval}")
+                if args.dropbear_video_length is not None:
+                    train_args.append(f"--video_length={args.dropbear_video_length}")
+                if args.headless and "--headless" not in unknown:
+                    train_args.append("--headless")
+                train_args += unknown
+                cmd = base_cmd + [script_path] + train_args
                 run_cmd(cmd, cwd=repo_dir, env=run_env)
 
         elif args.run == "dropbear_play":

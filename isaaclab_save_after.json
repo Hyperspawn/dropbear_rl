@@ -1,0 +1,26 @@
+{
+  "timestamp": "2025-12-11T03:56:23.501276",
+  "run": "dropbear_train",
+  "dropbear_task": "Isaac-Velocity-Dropbear-v0",
+  "checkpoint": null,
+  "args": [
+    "--num_envs=80",
+    "+agent_cfg.policy.init_noise_std=0.75",
+    "+agent_cfg.algorithm.entropy_coef=0.05",
+    "+agent_cfg.algorithm.clip_param=0.1",
+    "+agent_cfg.algorithm.learning_rate=0.001",
+    "+agent_cfg.algorithm.max_grad_norm=0.5",
+    "+agent_cfg.algorithm.num_learning_epochs=2",
+    "+agent_cfg.algorithm.value_loss_coef=1",
+    "+agent_cfg.algorithm.use_clipped_value_loss=True",
+    "+agent_cfg.algorithm.schedule=fixed",
+    "+agent_cfg.algorithm.gamma=0.99",
+    "+agent_cfg.algorithm.lam=0.95",
+    "+agent_cfg.algorithm.desired_kl=0.005",
+    "+agent_cfg.clip_actions=True",
+    "+env_cfg.terminations.base_height.params.minimum_height=0.5",
+    "+env_cfg.terminations.base_contact.params.threshold=1",
+    "+env_cfg.rewards.undesired_contacts.weight=-1",
+    "+env_cfg.rewards.feet_slide.weight=-0.2"
+  ]
+}

@@ -522,6 +522,17 @@ def get_nkn_app_address() -> str:
     return str(nkn_cfg.get("app_address") or "")
 
 
+def get_nkn_bridge() -> Optional[NKNSidecar]:
+    """Get the NKN bridge sidecar instance for direct communication.
+
+    Returns:
+        NKNSidecar instance if NKN client is active, None otherwise
+    """
+    if _nkn_control and _nkn_control.client:
+        return _nkn_control.client.sidecar
+    return None
+
+
 def _dispatch_direct(cmd: Iterable[str], description: Optional[str]) -> subprocess.CompletedProcess:
     cfg = _load_remote_config()
     host = cfg.get("host")

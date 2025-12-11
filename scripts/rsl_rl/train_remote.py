@@ -86,15 +86,60 @@ def main():
     if args_cli.device is not None:
         task_config["device"] = args_cli.device
 
-    # Create stub environment (no IsaacLab)
-    print("[train_remote] Creating stub environment (no IsaacLab imports)")
-    env = build_stub_env(
-        task_name=args_cli.task or "Isaac-Velocity-Dropbear-v0",
-        num_envs=task_config.get("num_envs", 4),
-        num_obs=task_config.get("num_obs", 48),
-        num_actions=task_config.get("num_actions", 12),
-        device=task_config.get("device", "cuda:0"),
-    )
+    # Determine if we have a controller sending observations
+    # Check if remote_client has a controller address (meaning RTX is running train.py)
+    import sys
+    from pathlib import Path
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT))
+    import remote_client
+
+    # Get controller address from app_address field (RTX controller)
+    controller_address = None
+    if hasattr(args_cli, 'app_address') and args_cli.app_address:
+        controller_address = args_cli.app_address
+    else:
+        # Try to get from remote config
+        cfg = remote_client.get_remote_config()
+        nkn_cfg = cfg.get("nkn", {})
+        controller_address = nkn_cfg.get("app_address", "")
+
+    if controller_address:
+        print("[train_remote] ========================================")
+        print("[train_remote] PRODUCTION MODE: RemoteVecEnv")
+        print(f"[train_remote] Waiting for observations from RTX controller: {controller_address}")
+        print("[train_remote] ========================================")
+
+        # Get NKN bridge
+        nkn_bridge = remote_client.get_nkn_bridge()
+        if not nkn_bridge:
+            raise RuntimeError("[train_remote] No NKN bridge available for RemoteVecEnv!")
+
+        # Create RemoteVecEnv for production training
+        from dropbear_rl_lab.remote import RemoteVecEnv
+        env = RemoteVecEnv(
+            num_envs=task_config.get("num_envs", 4),
+            num_obs=task_config.get("num_obs", 48),
+            num_actions=task_config.get("num_actions", 12),
+            nkn_bridge=nkn_bridge,
+            controller_address=controller_address,
+            device=task_config.get("device", "cuda:0"),
+            timeout=30.0,
+        )
+        print(f"[train_remote] RemoteVecEnv initialized - waiting for obs from {controller_address}")
+    else:
+        # Fallback to stub environment for testing
+        print("[train_remote] ========================================")
+        print("[train_remote] STUB MODE: No controller detected")
+        print("[train_remote] Creating stub environment (no IsaacLab imports)")
+        print("[train_remote] ========================================")
+        env = build_stub_env(
+            task_name=args_cli.task or "Isaac-Velocity-Dropbear-v0",
+            num_envs=task_config.get("num_envs", 4),
+            num_obs=task_config.get("num_obs", 48),
+            num_actions=task_config.get("num_actions", 12),
+            device=task_config.get("device", "cuda:0"),
+        )
 
     # Create minimal agent configuration
     # In production, this would come from shared config or controller

@@ -172,6 +172,44 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
+    # Check if remote mode is enabled for offloading policy to A100 workers
+    import sys
+    from pathlib import Path
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    sys.path.insert(0, str(PROJECT_ROOT))
+    import remote_client
+
+    if remote_client.is_remote_enabled():
+        print("[train.py] ========================================")
+        print("[train.py] REMOTE MODE ACTIVE")
+        print("[train.py] RTX: Running IsaacLab simulation locally")
+        print("[train.py] A100: Policy inference via NKN")
+        print("[train.py] ========================================")
+
+        # Get NKN bridge and worker address
+        nkn_bridge = remote_client.get_nkn_bridge()
+        worker_address = remote_client.get_nkn_remote_address()
+
+        if not nkn_bridge:
+            raise RuntimeError("[train.py] Remote mode enabled but NKN bridge is not active!")
+        if not worker_address:
+            raise RuntimeError("[train.py] Remote mode enabled but worker address is not set!")
+
+        print(f"[train.py] NKN worker address: {worker_address}")
+        print(f"[train.py] Wrapping environment for remote policy execution...")
+
+        # Import and wrap with ControllerRemoteEnvWrapper
+        from controller_remote_env import ControllerRemoteEnvWrapper
+        env = ControllerRemoteEnvWrapper(
+            base_env=env,
+            nkn_bridge=nkn_bridge,
+            worker_address=worker_address,
+            timeout=30.0,
+        )
+        print("[train.py] Environment wrapped - simulation local, policy remote!")
+    else:
+        print("[train.py] Local mode: simulation and policy both on RTX")
+
     # create runner from rsl-rl
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
     # write git state to logs
