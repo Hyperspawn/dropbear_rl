@@ -111,7 +111,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="world"),  # Dropbear's main body
-            "mass_distribution_params": (-1.0, 3.0),
+            # Keep mass perturbations modest to avoid instability
+            "mass_distribution_params": (-0.5, 1.0),
             "operation": "add",
         },
     )
@@ -156,8 +157,9 @@ class EventCfg:
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
-        interval_range_s=(5.0, 5.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+        # Effectively disable random pushes for stability; re-enable later if needed.
+        interval_range_s=(1e9, 1e9),
+        params={"velocity_range": {"x": (0.0, 0.0), "y": (0.0, 0.0)}},
     )
 
 
@@ -194,7 +196,7 @@ class ActionsCfg:
             "LL_hip_joint", "LL_knee_actuator_joint", "RL_hip_joint", "RL_knee_actuator_joint",
             "LL_Revolute28", "LL_Revolute29", "RL_Revolute28", "RL_Revolute29",
         ], 
-        scale=0.05,  # Even smaller action scale to prevent weird movements 
+        scale=0.02,  # More conservative action scale to prevent explosive motions
         use_default_offset=True
     )
 
