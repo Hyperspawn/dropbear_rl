@@ -280,62 +280,115 @@ class RemoteCursesUI:
         self._push_notification(f"Outgoing RL payload: {summary}")
 
 
+def detect_cuda_version() -> str:
+    """Detect CUDA version on the system."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        driver = result.stdout.strip().split('\n')[0]
+        print(f"[remote] Detected NVIDIA driver: {driver}")
+        print("[remote] Using cu128 PyTorch build (CUDA 12.8 support)")
+        return "cu128"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("[remote] Warning: Could not detect CUDA, defaulting to cu128")
+        return "cu128"
+
+
+def verify_torch_cuda(python_exe: Path, env: Dict[str, str]) -> bool:
+    """Verify PyTorch CUDA is working."""
+    test_script = """
+import torch
+print(f"PyTorch: {torch.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"CUDA version: {torch.version.cuda}")
+    print(f"GPU count: {torch.cuda.device_count()}")
+    for i in range(torch.cuda.device_count()):
+        print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+    x = torch.randn(3, 3, device='cuda')
+    y = x @ x
+    print("✓ GPU tensor ops work")
+"""
+    try:
+        subprocess.check_call([str(python_exe), "-c", test_script], env=env)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
 def boot_remote_venv() -> None:
     if INSIDE_FLAG in sys.argv:
         sys.argv.remove(INSIDE_FLAG)
         return
+
+    print("[remote] ============================================")
+    print("[remote] Remote A100 Worker Bootstrap")
+    print("[remote] ============================================")
+
     py311 = find_python_311()
     if not py311:
-        raise RuntimeError("Python 3.11 is required to bootstrap the remote environment.")
+        raise RuntimeError("Python 3.11 required")
+    print(f"[remote] Python: {py311}")
+
     create_venv_with_python(py311, REMOTE_VENV_DIR)
     remote_python = venv_python(REMOTE_VENV_DIR)
     if not remote_python.exists():
-        raise RuntimeError("Failed to create remote Python binary.")
+        raise RuntimeError("Failed to create venv")
+
     env = prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
+
     if not REMOTE_MARKER.exists():
-        print("[remote] Bootstrapping IsaacLab-free environment for A100 worker...")
-        print("[remote] Installing: PyTorch, rsl-rl, dropbear_rl_lab[remote]")
+        print("[remote] Installing: PyTorch+CUDA, rsl-rl, dropbear_rl_lab[remote]")
         print("[remote] NOT installing: Isaac Sim, IsaacLab")
 
+        print("\n[1/5] Upgrading pip...")
         run_cmd([str(remote_python), "-m", "pip", "install", "-U", "pip", "setuptools", "wheel"], env=env)
 
-        # Install PyTorch with CUDA 12.8 support
-        torch_index = "https://download.pytorch.org/whl/cu128"
-        torch_pkgs = [
-            f"torch=={DEFAULT_TORCH_VERSION}",
-            f"torchvision=={DEFAULT_TORCHVISION_VERSION}",
-            f"torchaudio=={DEFAULT_TORCHAUDIO_VERSION}",
-            "--index-url",
-            torch_index,
-        ]
-        run_cmd([str(remote_python), "-m", "pip", "install", "-U"] + torch_pkgs, env=env)
+        cuda_ver = detect_cuda_version()
+        print(f"\n[2/5] Installing PyTorch ({cuda_ver})...")
+        torch_index = f"https://download.pytorch.org/whl/{cuda_ver}"
+        run_cmd([str(remote_python), "-m", "pip", "install",
+                 f"torch=={DEFAULT_TORCH_VERSION}",
+                 f"torchvision=={DEFAULT_TORCHVISION_VERSION}",
+                 f"torchaudio=={DEFAULT_TORCHAUDIO_VERSION}",
+                 "--index-url", torch_index], env=env)
 
-        # Install rsl-rl-lib (needed for OnPolicyRunner)
+        if not verify_torch_cuda(remote_python, env):
+            raise RuntimeError("PyTorch CUDA verification failed")
+
+        print("\n[3/5] Installing rsl-rl...")
         run_cmd([str(remote_python), "-m", "pip", "install", "rsl-rl-lib>=2.3.1"], env=env)
 
-        # Install dropbear_rl_lab[remote] - includes gymnasium, numpy (NO IsaacLab)
-        dropbear_pkg = str(DROPBEAR_EXTENSION_DIR)
-        run_cmd([str(remote_python), "-m", "pip", "install", "-e", f"{dropbear_pkg}[remote]"], env=env)
+        print("\n[4/5] Installing dropbear_rl_lab[remote]...")
+        run_cmd([str(remote_python), "-m", "pip", "install", "-e", f"{DROPBEAR_EXTENSION_DIR}[remote]"], env=env)
 
-        # Verify no IsaacLab was installed
+        print("\n[5/5] Verifying...")
+        for mod in ["gymnasium", "numpy", "rsl_rl", "dropbear_rl_lab.remote"]:
+            try:
+                subprocess.check_call([str(remote_python), "-c", f"import {mod}"], env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"[remote] ✓ {mod}")
+            except subprocess.CalledProcessError:
+                raise RuntimeError(f"{mod} not installed")
+
         try:
-            subprocess.check_call(
-                [str(remote_python), "-c", "import isaaclab"],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print("[remote] WARNING: IsaacLab is installed! This should not happen on A100 workers.")
+            subprocess.check_call([str(remote_python), "-c", "import isaaclab"], env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            raise RuntimeError("IsaacLab detected - environment contaminated!")
         except subprocess.CalledProcessError:
-            print("[remote] ✓ Verified: No IsaacLab installed (correct for A100 worker)")
+            print("[remote] ✓ No IsaacLab (correct)")
 
         ensure_actor_critic_std(REMOTE_VENV_DIR)
         write_marker(REMOTE_VENV_DIR, REMOTE_MARKER.name)
-        print("[remote] Bootstrap complete - IsaacLab-free environment ready")
-    os.execv(
-        str(remote_python),
-        [str(remote_python), str(__file__), INSIDE_FLAG] + [arg for arg in sys.argv[1:]],
-    )
+        print("\n[remote] ============================================")
+        print("[remote] Bootstrap Complete - Ready for RL!")
+        print("[remote] ============================================\n")
+
+    os.execv(str(remote_python), [str(remote_python), str(__file__), INSIDE_FLAG] + [arg for arg in sys.argv[1:]])
 
 
 class NKNRemoteAgent:
