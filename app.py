@@ -1708,11 +1708,18 @@ def main() -> int:
                 print("[i] A100 Worker: Running policy inference (train_remote.py)")
                 print("[i] ========================================")
 
-                # Remote-heavy defaults to exercise A100 (last wins even if user passed smaller values)
-                heavy_remote_envs = 64
-                heavy_steps_per_env = 512
-                heavy_learning_epochs = 10
-                heavy_mini_batches = 16
+                # Remote-heavy defaults to exercise A100, but keep GUI-friendly counts when not headless.
+                if args.headless:
+                    heavy_remote_envs = 32
+                    heavy_steps_per_env = 256
+                    heavy_learning_epochs = 8
+                    heavy_mini_batches = 8
+                else:
+                    # When rendering, keep env count modest to avoid IsaacSim overload.
+                    heavy_remote_envs = 8
+                    heavy_steps_per_env = 128
+                    heavy_learning_epochs = 6
+                    heavy_mini_batches = 4
                 heavy_hidden_dims = "[512,512,512]"
 
                 def _force_override(arg_list: List[str], key: str, value: object) -> None:
