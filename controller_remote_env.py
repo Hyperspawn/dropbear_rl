@@ -74,6 +74,12 @@ class ControllerRemoteEnvWrapper:
                 self._original_on_message(src, body)
             return
 
+        # Ignore non-protocol messages (e.g., handshake/status)
+        if not isinstance(body, dict) or "msg_type" not in body:
+            if self._original_on_message:
+                self._original_on_message(src, body)
+            return
+
         try:
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)

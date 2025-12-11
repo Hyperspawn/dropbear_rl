@@ -1714,6 +1714,10 @@ def main() -> int:
                     f"--task={args.dropbear_task}",
                     f"--max_iterations={args.dropbear_max_iterations}",
                 ]
+                controller_addr = remote_client.get_nkn_app_address()
+                if controller_addr:
+                    remote_train_args.append(f"--controller_address={controller_addr}")
+                    remote_train_args.append(f"--app_address={controller_addr}")
                 if args.dropbear_video_interval is not None:
                     remote_train_args.append(f"--video_interval={args.dropbear_video_interval}")
                 if args.dropbear_video_length is not None:

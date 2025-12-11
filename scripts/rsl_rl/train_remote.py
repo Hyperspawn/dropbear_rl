@@ -11,8 +11,10 @@ decorators from train.py but uses lightweight stub environments.
 """
 
 import argparse
+import json
 import os
 import pickle
+import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,7 +42,10 @@ from remote_protocol_rl import (
     MessageSequencer,
     create_train_done_message,
     create_train_start_message,
+    create_metrics_message,
 )
+
+from nkn_sidecar import NKNSidecar
 print("[train_remote] Running on IsaacLab-free tensor worker")
 print("[train_remote] This script never imports IsaacLab modules")
 
@@ -68,6 +73,10 @@ def main():
     parser.add_argument("--distributed", action="store_true", default=False, help="Run training with multiple GPUs.")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on.")
     parser.add_argument("--headless", action="store_true", default=False, help="Headless mode (ignored on remote).")
+    parser.add_argument("--app_address", type=str, default=None, help="NKN address of controller/app (alias).")
+    parser.add_argument("--controller_address", type=str, default=None, help="NKN address of controller/app.")
+    parser.add_argument("--nkn_seed", type=str, default=None, help="Override NKN seed for worker sidecar.")
+    parser.add_argument("--nkn_identifier", type=str, default=None, help="Identifier for worker sidecar.")
 
     # Append RSL-RL cli arguments
     cli_args.add_rsl_rl_args(parser)
@@ -92,22 +101,61 @@ def main():
         task_config["device"] = args_cli.device
 
     # Determine if we have a controller sending observations
-    # Check if remote_client has a controller address (meaning RTX is running train.py)
-    import sys
-    from pathlib import Path
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     sys.path.insert(0, str(PROJECT_ROOT))
-    import remote_client
 
-    # Get controller address from app_address field (RTX controller)
-    controller_address = None
-    if hasattr(args_cli, 'app_address') and args_cli.app_address:
-        controller_address = args_cli.app_address
-    else:
-        # Try to get from remote config
-        cfg = remote_client.get_remote_config()
-        nkn_cfg = cfg.get("nkn", {})
-        controller_address = nkn_cfg.get("app_address", "")
+    controller_address = (
+        args_cli.controller_address
+        or args_cli.app_address
+        or os.environ.get("DROPBEAR_CONTROLLER_NKN_ADDRESS")
+        or ""
+    )
+
+    # Build or reuse NKN sidecar for worker dataplane
+    nkn_seed = (
+        (args_cli.nkn_seed or "").strip()
+        or os.environ.get("DROPBEAR_REMOTE_NKN_SEED", "").strip()
+    )
+    nkn_identifier = args_cli.nkn_identifier or "dropbear_remote_worker"
+    nkn_seed_ws = ""
+    nkn_num_subclients = 2
+
+    # Attempt to load config for defaults (if present)
+    config_file = PROJECT_ROOT / "isaaclab_remote_connection.json"
+    if config_file.exists():
+        try:
+            config = json.loads(config_file.read_text(encoding="utf-8"))
+            nkn_cfg = config.get("nkn", {})
+            nkn_seed = nkn_seed or str(nkn_cfg.get("seed", "")).strip()
+            controller_address = controller_address or str(nkn_cfg.get("app_address", "")).strip()
+            nkn_identifier = args_cli.nkn_identifier or str(nkn_cfg.get("identifier", "dropbear_remote_worker"))
+            nkn_seed_ws = str(nkn_cfg.get("seed_ws", "")).strip()
+            try:
+                nkn_num_subclients = max(1, int(nkn_cfg.get("num_subclients", nkn_num_subclients)))
+            except Exception:
+                nkn_num_subclients = 2
+        except Exception as exc:  # pragma: no cover
+            print(f"[train_remote] Failed to read NKN config: {exc}")
+
+    if not nkn_seed:
+        nkn_seed = secrets.token_hex(32)
+        print(f"[train_remote] Generated transient NKN seed for worker: {nkn_seed}")
+
+    nkn_bridge = None
+    if controller_address:
+        try:
+            nkn_bridge = NKNSidecar(
+                seed_hex=nkn_seed,
+                identifier=nkn_identifier,
+                num_subclients=nkn_num_subclients,
+                seed_ws=nkn_seed_ws,
+            )
+            nkn_bridge.start()
+            nkn_bridge.wait_ready(timeout=30.0)
+            print(f"[train_remote] NKN bridge ready at {nkn_bridge.address}")
+        except Exception as exc:
+            print(f"[train_remote] Failed to start NKN sidecar: {exc}")
+            nkn_bridge = None
 
     if controller_address:
         print("[train_remote] ========================================")
@@ -115,8 +163,6 @@ def main():
         print(f"[train_remote] Waiting for observations from RTX controller: {controller_address}")
         print("[train_remote] ========================================")
 
-        # Get NKN bridge
-        nkn_bridge = remote_client.get_nkn_bridge()
         if not nkn_bridge:
             raise RuntimeError("[train_remote] No NKN bridge available for RemoteVecEnv!")
 
@@ -313,6 +359,14 @@ def main():
                     iteration=current_it,
                 )
                 print(f"[train_remote] Transfer initiated: {checkpoint_id}")
+
+        # Emit lightweight metrics to controller for progress
+        if controller_address and nkn_bridge:
+            try:
+                metrics_msg = create_metrics_message(train_sequencer, iteration=current_it, metrics={})
+                nkn_bridge.send_dm(controller_address, metrics_msg.to_dict())
+            except Exception as exc:
+                print(f"[train_remote] Failed to send metrics: {exc}")
 
     # Close environment
     env.close()

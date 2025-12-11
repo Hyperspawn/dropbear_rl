@@ -235,7 +235,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             MSG_CHECKPOINT_REQUEST_RETRY,
             MSG_CHECKPOINT_START,
         )
-        from remote_protocol_rl import MessageEnvelope, MessageSequencer, MSG_TRAIN_DONE
+        from remote_protocol_rl import MessageEnvelope, MessageSequencer, MSG_TRAIN_DONE, MSG_METRICS, MSG_TRAIN_START
 
         checkpoint_receiver = CheckpointReceiver(
             nkn_bridge=nkn_bridge,
@@ -265,6 +265,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             if msg_type == MSG_CHECKPOINT_REQUEST_RETRY:
                 return
             if msg_type == MSG_CHECKPOINT_ACK:
+                return
+            if msg_type == MSG_TRAIN_START:
+                print("[train.py] Remote worker acknowledged controller; training start received.")
+                return
+            if msg_type == MSG_METRICS:
+                iteration = envelope.payload.get("iteration")
+                print(f"[train.py] Remote iteration progress: {iteration}")
                 return
             if msg_type == MSG_TRAIN_DONE:
                 remote_training_state["iterations"] = envelope.payload.get("iterations")
