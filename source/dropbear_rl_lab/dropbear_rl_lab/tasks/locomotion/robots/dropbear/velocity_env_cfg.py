@@ -415,6 +415,11 @@ class DropbearVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
     events: EventCfg = EventCfg()
     curriculum: CurriculumCfg = CurriculumCfg()
 
+    # Reset stochasticity controls (can be overridden via Hydra)
+    reset_xy_jitter: float = 0.0  # meters
+    reset_yaw_jitter: float = 0.0  # radians
+    reset_z: float = 1.0
+
     def __post_init__(self):
         """Post initialization."""
         # general settings
@@ -435,6 +440,19 @@ class DropbearVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         # we tick all the sensors based on the smallest update period (physics update period)
         self.scene.contact_forces.update_period = self.sim.dt
         self.scene.height_scanner.update_period = self.decimation * self.sim.dt
+
+        # Apply reset jitter controls
+        xy = float(getattr(self, "reset_xy_jitter", 0.0))
+        yaw = float(getattr(self, "reset_yaw_jitter", 0.0))
+        z = float(getattr(self, "reset_z", 1.0))
+        self.events.reset_base.params["pose_range"] = {
+            "x": (-xy, xy),
+            "y": (-xy, xy),
+            "z": (z, z),
+            "roll": (0.0, 0.0),
+            "pitch": (0.0, 0.0),
+            "yaw": (-yaw, yaw),
+        }
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training

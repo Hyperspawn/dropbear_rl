@@ -28,6 +28,25 @@ parser.add_argument(
     action="store_true",
     help="Use the pre-trained checkpoint from Nucleus.",
 )
+# Reset pose jitter controls (for deterministic respawn during playback)
+parser.add_argument(
+    "--reset_xy_jitter",
+    type=float,
+    default=None,
+    help="XY jitter (meters) applied on reset; set to 0 for deterministic respawn.",
+)
+parser.add_argument(
+    "--reset_yaw_jitter",
+    type=float,
+    default=None,
+    help="Yaw jitter (radians) applied on reset; set to 0 for deterministic respawn.",
+)
+parser.add_argument(
+    "--reset_z",
+    type=float,
+    default=None,
+    help="Reset height (meters).",
+)
 # Optional overrides to match checkpoint architecture
 parser.add_argument(
     "--actor_hidden_dims",
@@ -87,6 +106,13 @@ def main():
         entry_point_key="play_env_cfg_entry_point",
     )
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    # Apply reset jitter overrides if provided
+    if args_cli.reset_xy_jitter is not None:
+        env_cfg.reset_xy_jitter = args_cli.reset_xy_jitter
+    if args_cli.reset_yaw_jitter is not None:
+        env_cfg.reset_yaw_jitter = args_cli.reset_yaw_jitter
+    if args_cli.reset_z is not None:
+        env_cfg.reset_z = args_cli.reset_z
     # Allow overriding hidden dimensions to match checkpoints trained with custom widths.
     def _parse_dims(raw: str | None) -> list[int] | None:
         if not raw:

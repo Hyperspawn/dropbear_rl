@@ -1905,6 +1905,9 @@ def main() -> int:
             # hidden-dim overrides into the play.py flags.
             actor_override: Optional[str] = None
             critic_override: Optional[str] = None
+            reset_xy_override: Optional[str] = None
+            reset_yaw_override: Optional[str] = None
+            reset_z_override: Optional[str] = None
 
             def _clean_dims(raw: str) -> str:
                 # Accept forms like "[768,768,768]" or "768,768,768"
@@ -1925,6 +1928,15 @@ def main() -> int:
                 ):
                     critic_override = _clean_dims(u.split("=", 1)[1])
                     continue
+                if u.startswith("++env_cfg.reset_xy_jitter=") or u.startswith("+env_cfg.reset_xy_jitter="):
+                    reset_xy_override = u.split("=", 1)[1]
+                    continue
+                if u.startswith("++env_cfg.reset_yaw_jitter=") or u.startswith("+env_cfg.reset_yaw_jitter="):
+                    reset_yaw_override = u.split("=", 1)[1]
+                    continue
+                if u.startswith("++env_cfg.reset_z=") or u.startswith("+env_cfg.reset_z="):
+                    reset_z_override = u.split("=", 1)[1]
+                    continue
                 filtered_unknown.append(u)
             play_args: List[str] = [f"--task={args.dropbear_play_task}"]
             if args.dropbear_video or args.dropbear_play_video:
@@ -1937,6 +1949,12 @@ def main() -> int:
                 play_args.append(f"--actor_hidden_dims={actor_override}")
             if critic_override:
                 play_args.append(f"--critic_hidden_dims={critic_override}")
+            if reset_xy_override is not None:
+                play_args.append(f"--reset_xy_jitter={reset_xy_override}")
+            if reset_yaw_override is not None:
+                play_args.append(f"--reset_yaw_jitter={reset_yaw_override}")
+            if reset_z_override is not None:
+                play_args.append(f"--reset_z={reset_z_override}")
             play_args += filtered_unknown
             cmd = base_cmd + [script_path] + play_args
             run_cmd(cmd, cwd=repo_dir, env=run_env)
