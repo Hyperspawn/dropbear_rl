@@ -295,8 +295,10 @@ class RewardsCfg:
     )
 
     # -- robot (scaled down for stability)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-0.001)  # Much smaller
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-0.01, params={"target_height": 1.0})  # Much smaller
+    # Stronger upright posture bias
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-0.01)
+    # Encourage maintaining nominal torso height
+    base_height = RewTerm(func=mdp.base_height_l2, weight=-0.02, params={"target_height": 1.0})
 
     # -- feet (using available foot contact bodies - simplified for now)
     gait = RewTerm(
@@ -355,7 +357,8 @@ class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.5})  # Lower for humanoid
+    # Terminate sooner when the torso drops—helps reset quickly after a fall
+    base_height = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.6})
     base_contact = DoneTerm(
         func=mdp.illegal_contact,
         params={
@@ -398,7 +401,8 @@ class DropbearVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 4
-        self.episode_length_s = 5.0  # Very short episodes for initial testing
+        # Slightly longer episodes to allow recovery attempts but still short for fast resets
+        self.episode_length_s = 8.0
         # simulation settings
         self.sim.dt = 0.01  # Larger timestep for stability
         self.sim.render_interval = self.decimation
