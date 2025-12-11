@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import socket
@@ -50,7 +51,18 @@ SEED_FILE = PROJECT_ROOT / ".remote_nkn_seed"
 
 
 def _prepare_env() -> Dict[str, str]:
-    return prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
+    env = prepend_path(dict(os.environ), venv_bin_dir(REMOTE_VENV_DIR))
+    project_path = str(PROJECT_ROOT)
+    isaaclab_path = str(PROJECT_ROOT / "IsaacLab")
+    dropbear_path = str(DROPBEAR_EXTENSION_DIR)
+    env.setdefault("ISAACLAB_PATH", isaaclab_path)
+    pythonpath_parts = []
+    raw_pythonpath = env.get("PYTHONPATH", "")
+    if raw_pythonpath:
+        pythonpath_parts.append(raw_pythonpath)
+    pythonpath_parts.extend([project_path, isaaclab_path, dropbear_path])
+    env["PYTHONPATH"] = os.pathsep.join(part for part in pythonpath_parts if part)
+    return env
 
 
 def resolve_command(cmd: Iterable[str]) -> List[str]:
@@ -82,6 +94,19 @@ def _save_persistent_seed(seed: str) -> None:
         SEED_FILE.write_text(seed.lower(), encoding="utf-8")
     except Exception:
         pass
+
+
+def _load_controller_address_from_config() -> str:
+    try:
+        config = PROJECT_ROOT / "isaaclab_remote_connection.json"
+        if not config.exists():
+            return ""
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        nkn_cfg = payload.get("nkn", {})
+        address = nkn_cfg.get("app_address") or ""
+        return str(address).strip()
+    except Exception:
+        return ""
 
 
 def _stream_command(
@@ -439,7 +464,13 @@ def main() -> None:
         print(f"[remote] Generated NKN seed for remote agent: {seed}")
     _save_persistent_seed(seed)
 
-    agent = NKNRemoteAgent(seed_hex=seed, identifier=args.nkn_identifier, num_subclients=args.nkn_num_subclients, controller_address=args.app_address)
+    controller_address = args.app_address.strip() or _load_controller_address_from_config()
+    agent = NKNRemoteAgent(
+        seed_hex=seed,
+        identifier=args.nkn_identifier,
+        num_subclients=args.nkn_num_subclients,
+        controller_address=controller_address,
+    )
     agent.run_blocking()
 
 

@@ -1714,6 +1714,8 @@ def main() -> int:
             if args.headless and "--headless" not in unknown:
                 train_args.append("--headless")
             train_args += unknown
+            if remote_client.is_remote_enabled() and "--headless" not in train_args:
+                train_args.append("--headless")
             cmd = base_cmd + [script_path] + train_args
             if remote_client.is_remote_enabled():
                 cfg = remote_client.get_remote_config()
