@@ -340,7 +340,12 @@ def main():
         checkpoint_sender = CheckpointSender(nkn_bridge, env.sequencer if hasattr(env, 'sequencer') else None)
         print("[train_remote] Checkpoint auto-transfer enabled → RTX controller")
         try:
-            start_msg = create_train_start_message(train_sequencer, task_config, agent_dict)
+            start_msg = create_train_start_message(
+                train_sequencer,
+                task_config,
+                agent_dict,
+                worker_address=str(nkn_bridge.address or ""),
+            )
             nkn_bridge.send_dm(controller_address, start_msg.to_dict())
             print("[train_remote] train_start sent to controller")
         except Exception as exc:

@@ -202,6 +202,11 @@ class ControllerRemoteEnvWrapper:
         """Delegate unknown attributes to base environment."""
         return getattr(self.base_env, name)
 
+    def set_worker_address(self, address: str) -> None:
+        """Update worker address (used if worker shares runtime address after start)."""
+        if address:
+            self.worker_address = address
+
     def _heartbeat_loop(self) -> None:
         """Periodically send heartbeat to the worker to keep the link alive."""
         while not self._stop_event.is_set():

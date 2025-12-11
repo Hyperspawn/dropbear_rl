@@ -245,6 +245,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         stop_event = threading.Event()
         worker_ready_event = threading.Event()
+        worker_address_override: list[str] = []
         original_on_message = getattr(nkn_bridge, "on_message", None)
 
         def nkn_message_handler(src: str, body: dict):
@@ -269,6 +270,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 return
             if msg_type == MSG_TRAIN_START:
                 print("[train.py] Remote worker acknowledged controller; training start received.")
+                new_addr = envelope.payload.get("worker_address")
+                if new_addr:
+                    worker_address_override.clear()
+                    worker_address_override.append(str(new_addr))
+                    print(f"[train.py] Remote worker reported data address: {new_addr}")
                 worker_ready_event.set()
                 return
             if msg_type == MSG_HEARTBEAT:
@@ -320,6 +326,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 print("[train.py] Waiting for remote worker ready signal...")
                 if not worker_ready_event.wait(timeout=45.0):
                     raise RuntimeError("Remote worker did not signal readiness (train_start/heartbeat).")
+                if worker_address_override:
+                    env.set_worker_address(worker_address_override[0])
+                    print(f"[train.py] Updated worker address to {worker_address_override[0]}")
                 print("[train.py] Remote worker ready; starting simulation loop.")
                 env.reset()
                 while not stop_event.is_set():

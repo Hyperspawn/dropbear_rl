@@ -218,12 +218,15 @@ def create_train_start_message(
     sequencer: MessageSequencer,
     task_config: Dict[str, Any],
     agent_config: Dict[str, Any],
+    worker_address: str = "",
 ) -> MessageEnvelope:
     """Create training start message with configs."""
     payload = {
         "task_config": task_config,
         "agent_config": agent_config,
     }
+    if worker_address:
+        payload["worker_address"] = worker_address
     return sequencer.create_message(MSG_TRAIN_START, payload)
 
 
