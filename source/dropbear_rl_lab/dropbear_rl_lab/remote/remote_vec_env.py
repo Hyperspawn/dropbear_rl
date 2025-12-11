@@ -255,8 +255,20 @@ class RemoteVecEnv:
         Returns:
             Dictionary with "policy" key containing observation tensor
         """
+        # RSL-RL's OnPolicyRunner calls this before reset(), so return zeros if not ready
         if self._current_obs is None:
-            raise RuntimeError("[remote_env] No observations available, call reset() first")
+            print("[remote_env] WARNING: get_observations() called before reset(), returning zeros")
+            # Return zero observations with correct shape
+            zero_obs = {"policy": torch.zeros(self.num_envs, self.num_obs, device=self.device)}
+
+            class ObsDict(dict):
+                """Dict subclass that supports .to() method for RSL-RL compatibility."""
+                def to(self, device):
+                    """Move all tensors in the dict to the specified device."""
+                    return ObsDict({k: v.to(device) if isinstance(v, torch.Tensor) else v
+                                   for k, v in self.items()})
+
+            return ObsDict(zero_obs)
 
         # RSL-RL calls .to(device) on the result, so we need to wrap in a subclass
         class ObsDict(dict):
