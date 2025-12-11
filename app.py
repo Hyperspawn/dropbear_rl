@@ -1760,6 +1760,12 @@ def main() -> int:
                     train_args.append(f"--video_length={args.dropbear_video_length}")
                 if args.headless and "--headless" not in unknown:
                     train_args.append("--headless")
+
+                # Pass worker address to train.py (train.py runs in Isaac Sim environment)
+                if remote_addr:
+                    train_args.append(f"--remote_worker_address={remote_addr}")
+                    print(f"[i] Passing worker address to train.py: {remote_addr}")
+
                 train_args += unknown
                 cmd = base_cmd + [script_path] + train_args
                 print(f"[i] RTX will run: {' '.join(cmd)}")

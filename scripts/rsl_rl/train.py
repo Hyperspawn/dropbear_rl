@@ -29,6 +29,9 @@ parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy 
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
+parser.add_argument(
+    "--remote_worker_address", type=str, default=None, help="NKN address of remote A100 worker for policy execution."
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -173,32 +176,44 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     # Check if remote mode is enabled for offloading policy to A100 workers
-    import sys
-    from pathlib import Path
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-    sys.path.insert(0, str(PROJECT_ROOT))
-    import remote_client
-
-    if remote_client.is_remote_enabled():
+    if args_cli.remote_worker_address:
         print("[train.py] ========================================")
         print("[train.py] REMOTE MODE ACTIVE")
         print("[train.py] RTX: Running IsaacLab simulation locally")
         print("[train.py] A100: Policy inference via NKN")
         print("[train.py] ========================================")
 
-        # Get NKN bridge and worker address
-        nkn_bridge = remote_client.get_nkn_bridge()
-        worker_address = remote_client.get_nkn_remote_address()
-
-        if not nkn_bridge:
-            raise RuntimeError("[train.py] Remote mode enabled but NKN bridge is not active!")
-        if not worker_address:
-            raise RuntimeError("[train.py] Remote mode enabled but worker address is not set!")
-
+        worker_address = args_cli.remote_worker_address
         print(f"[train.py] NKN worker address: {worker_address}")
         print(f"[train.py] Wrapping environment for remote policy execution...")
 
         # Import and wrap with ControllerRemoteEnvWrapper
+        # NOTE: We need to create NKN bridge here in Isaac Sim environment
+        import sys
+        from pathlib import Path
+        PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+        sys.path.insert(0, str(PROJECT_ROOT))
+
+        from nkn_sidecar import NKNSidecar
+        import json
+
+        # Load NKN config from isaaclab_remote_connection.json
+        config_file = PROJECT_ROOT / "isaaclab_remote_connection.json"
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+
+        nkn_cfg = config.get("nkn", {})
+        nkn_bridge = NKNSidecar(
+            seed_hex=str(nkn_cfg.get("seed", "")),
+            identifier=str(nkn_cfg.get("identifier", "dropbear_app")),
+            num_subclients=max(1, int(nkn_cfg.get("num_subclients", 2))),
+            seed_ws=str(nkn_cfg.get("seed_ws", "")),
+        )
+        nkn_bridge.start()
+        nkn_bridge.wait_ready(timeout=30.0)
+
+        print(f"[train.py] NKN bridge started in Isaac Sim environment")
+
         from controller_remote_env import ControllerRemoteEnvWrapper
         env = ControllerRemoteEnvWrapper(
             base_env=env,
