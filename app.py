@@ -1336,6 +1336,21 @@ def run_curses_interface() -> Optional[list[str]]:
     return interactive_args
 
 
+def _apply_remote_cli_overrides(args: argparse.Namespace) -> None:
+    cfg = remote_client.get_remote_config()
+    updated = False
+    if getattr(args, "remote_mode", None):
+        cfg["mode"] = args.remote_mode
+        updated = True
+    target = getattr(args, "remote_nkn_target", None)
+    if target:
+        nkn_cfg = cfg.setdefault("nkn", {})
+        nkn_cfg["target"] = target
+        updated = True
+    if updated:
+        remote_client.save_remote_config(cfg)
+
+
 def add_dropbear_pythonpath(env: Dict[str, str]) -> Dict[str, str]:
     env2 = dict(env)
     existing = env2.get("PYTHONPATH", "")
@@ -1418,6 +1433,18 @@ def main() -> int:
         action="store_true",
         help="Save run metadata after the requested command completes.",
     )
+    ap.add_argument(
+        "--remote-mode",
+        choices=["direct", "reverse", "nkn"],
+        default="reverse",
+        help="Preferred remote compute mode when remote compute is enabled.",
+    )
+    ap.add_argument(
+        "--remote-nkn-target",
+        type=str,
+        default="",
+        help="NKN target address (remote agent identity) for offloading commands.",
+    )
 
     internal_flags = {"--_inside-venv"}
     external_args_present = any(arg not in internal_flags for arg in sys.argv[1:])
@@ -1434,6 +1461,7 @@ def main() -> int:
     else:
         args_list = sys.argv[1:]
     args, unknown = ap.parse_known_args(args_list)
+    _apply_remote_cli_overrides(args)
 
     base = Path(args.base).expanduser().resolve()
     env_dir = base / args.env
@@ -1646,6 +1674,15 @@ def main() -> int:
             train_args += unknown
             cmd = base_cmd + [script_path] + train_args
             if remote_client.is_remote_enabled():
+                cfg = remote_client.get_remote_config()
+                if cfg.get("mode") == "nkn":
+                    target = remote_client.get_nkn_target()
+                    remote_addr = remote_client.get_nkn_remote_address()
+                    print(f"[i] NKN target: {target or 'unset'}")
+                    if remote_addr:
+                        print(f"[i] Remote agent reported address: {remote_addr}")
+                    else:
+                        print("[i] Remote agent address pending handshake.")
                 remote_client.dispatch_remote(cmd, description="dropbear_train")
             else:
                 run_cmd(cmd, cwd=repo_dir, env=run_env)

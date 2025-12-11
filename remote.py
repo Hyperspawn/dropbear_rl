@@ -457,9 +457,9 @@ def run_reverse_agent(target_host: str, target_port: int) -> None:
                         send_fn,
                         session_id=msg.get("session_id"),
                     )
-            except Exception as exc:
-                print(f"[remote] Reverse agent connection failed: {exc}, retrying in 2s...", flush=True)
-                time.sleep(2)
+        except Exception as exc:
+            print(f"[remote] Reverse agent connection failed: {exc}, retrying in 2s...", flush=True)
+            time.sleep(2)
 
 
 class NKNRemoteAgent:
@@ -503,6 +503,7 @@ class NKNRemoteAgent:
 
     def _on_ready(self, address: str) -> None:
         print(f"[remote] NKN bridge ready at {address}")
+        print(f"[remote] Share this address with the controller (isaaclab_remote_connection.json nkn.target or --remote-nkn-target).")
 
     def _on_status(self, message: str) -> None:
         if message:
