@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import remote_protocol
 
@@ -35,6 +35,7 @@ from app import (
     venv_python,
     write_marker,
 )
+from nkn_sidecar import NKNSidecar
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 REMOTE_VENV_NAME = "env_remote"
@@ -51,10 +52,17 @@ def _stream_command(
     cmd: List[str],
     description: Optional[str],
     env: Dict[str, str],
-    writer,
+    send_payload: Callable[[Dict[str, object]], None],
+    session_id: Optional[str] = None,
 ) -> None:
     desc = description or "run started"
-    _send_payload(writer, {"type": "start", "description": desc})
+    def _send(payload: Dict[str, object]) -> None:
+        if session_id:
+            payload = dict(payload)
+            payload["session_id"] = session_id
+        send_payload(payload)
+
+    _send({"type": "start", "description": desc})
     try:
         process = subprocess.Popen(
             cmd,
@@ -65,14 +73,14 @@ def _stream_command(
             text=True,
         )
     except Exception as exc:
-        _send_payload(writer, {"type": "error", "message": f"Failed to start command: {exc}"})
-        _send_payload(writer, {"type": "exit", "code": 1})
+        _send({"type": "error", "message": f"Failed to start command: {exc}"})
+        _send({"type": "exit", "code": 1})
         return
     assert process.stdout is not None
     for line in process.stdout:
-        _send_payload(writer, {"type": "log", "message": line.rstrip()})
+        _send({"type": "log", "message": line.rstrip()})
     return_code = process.wait()
-    _send_payload(writer, {"type": "exit", "code": return_code})
+    _send({"type": "exit", "code": return_code})
 
 
 def _pick_accessible_port(preferred: int, max_port: int = 5006) -> int:
@@ -268,10 +276,20 @@ class RemoteRequestHandler(socketserver.StreamRequestHandler):
             self._send({"type": "error", "message": "Invalid command payload."})
             return
         description = request.get("description", "remote run")
-        self._send({"type": "ack", "message": "Remote server received request and is preparing IsaacLab."})
+        session_id = request.get("session_id")
+        ack_payload = {"type": "ack", "message": "Remote server received request and is preparing IsaacLab."}
+        if session_id:
+            ack_payload["session_id"] = session_id
+        self._send(ack_payload)
         env = _prepare_env()
         resolved_cmd = resolve_command(cmd)
-        _stream_command(resolved_cmd, description, env, self.wfile)
+        _stream_command(
+            resolved_cmd,
+            description,
+            env,
+            lambda payload: self._send(payload),
+            session_id=session_id,
+        )
 
     def _send(self, payload: Dict[str, object]) -> None:
         self.wfile.write(remote_protocol.encode_message(payload))
@@ -322,7 +340,12 @@ def main() -> None:
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host/interface to listen on.")
     parser.add_argument("--port", type=int, default=5003, help="Port to listen on.")
     parser.add_argument("--target-host", type=str, default="", help="Local app host to connect to for reverse remote.")
-    parser.add_argument("--target-port", type=int, default=8765, help="Local app port for reverse remote.")
+    parser.add_argument(
+        "--target-port",
+        type=int,
+        default=remote_client.get_reverse_port(),
+        help="Local app port to connect to for reverse remote (defaults to the reverse listener port).",
+    )
     parser.add_argument(
         "--reverse",
         action="store_true",
@@ -330,8 +353,29 @@ def main() -> None:
     )
     parser.add_argument("--menu", dest="menu", action="store_true", help="Use the curses menu.")
     parser.add_argument("--no-menu", dest="menu", action="store_false", help="Skip the curses menu.")
+    parser.add_argument(
+        "--nkn",
+        action="store_true",
+        help="Run the remote agent over NKN instead of raw sockets.",
+    )
+    parser.add_argument("--nkn-seed", type=str, default="", help="Seed hex for the NKN bridge (required with --nkn).")
+    parser.add_argument("--nkn-identifier", type=str, default="dropbear_remote", help="Identifier for the NKN bridge.")
+    parser.add_argument(
+        "--nkn-num-subclients",
+        type=int,
+        default=2,
+        help="Number of NKN sub-clients to spawn under the bridge.",
+    )
     parser.set_defaults(menu=sys.stdin.isatty())
     args = parser.parse_args()
+
+    if args.nkn:
+        seed = args.nkn_seed or os.environ.get("DROPBEAR_NKN_SEED", "")
+        if not seed:
+            raise RuntimeError("NKN seed hex is required to run in --nkn mode.")
+        agent = NKNRemoteAgent(seed, args.nkn_identifier, max(1, args.nkn_num_subclients))
+        agent.run_blocking()
+        return
 
     if args.menu and sys.stdin.isatty():
         action, payload = curses.wrapper(run_curses_menu, args)
@@ -387,15 +431,17 @@ def run_reverse_agent(target_host: str, target_port: int) -> None:
             with socket.create_connection((target_host, target_port), timeout=5) as sock:
                 reader = sock.makefile("rb")
                 writer = sock.makefile("wb")
+                session_id = str(uuid.uuid4())
                 _send_payload(
                     writer,
                     {
                         "type": "handshake",
-                        "session_id": str(uuid.uuid4()),
+                        "session_id": session_id,
                         "description": f"reverse agent {socket.gethostname()}",
                     },
                 )
-                _send_payload(writer, {"type": "ack", "message": "Remote agent ready and awaiting commands."})
+                _send_payload(writer, {"type": "ack", "message": "Remote agent ready and awaiting commands.", "session_id": session_id})
+                send_fn = lambda payload: _send_payload(writer, payload)
                 for msg in remote_protocol.iter_messages(reader):
                     if msg.get("type") != "command":
                         continue
@@ -404,9 +450,95 @@ def run_reverse_agent(target_host: str, target_port: int) -> None:
                         _send_payload(writer, {"type": "error", "message": "Invalid command payload."})
                         continue
                     resolved_cmd = resolve_command(cmd)
-                    _stream_command(resolved_cmd, msg.get("description"), env, writer)
-        except Exception as exc:
-            print(f"[remote] Reverse agent connection failed: {exc}, retrying in 2s...", flush=True)
-            time.sleep(2)
+                    _stream_command(
+                        resolved_cmd,
+                        msg.get("description"),
+                        env,
+                        send_fn,
+                        session_id=msg.get("session_id"),
+                    )
+            except Exception as exc:
+                print(f"[remote] Reverse agent connection failed: {exc}, retrying in 2s...", flush=True)
+                time.sleep(2)
+
+
+class NKNRemoteAgent:
+    def __init__(self, seed_hex: str, identifier: str, num_subclients: int) -> None:
+        if not seed_hex:
+            raise ValueError("NKN seed hex is required for the remote agent.")
+        self.env = _prepare_env()
+        self.bridge = NKNSidecar(
+            seed_hex=seed_hex,
+            identifier=identifier,
+            num_subclients=num_subclients,
+            on_ready=self._on_ready,
+            on_status=self._on_status,
+            on_message=self._on_message,
+            on_error=self._on_error,
+        )
+        self._running = False
+
+    def start(self) -> None:
+        self.bridge.start()
+        if not self.bridge.wait_ready(timeout=30.0):
+            raise RuntimeError("NKN bridge failed to become ready.")
+        self._running = True
+        print("[remote] NKN remote agent is up; waiting for commands.")
+
+    def stop(self) -> None:
+        if self._running:
+            self._running = False
+            self.bridge.stop()
+            print("[remote] NKN remote agent shutting down.")
+
+    def run_blocking(self) -> None:
+        try:
+            self.start()
+            while self._running:
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.stop()
+
+    def _on_ready(self, address: str) -> None:
+        print(f"[remote] NKN bridge ready at {address}")
+
+    def _on_status(self, message: str) -> None:
+        if message:
+            print(f"[remote] NKN status: {message}")
+
+    def _on_error(self, message: str) -> None:
+        if message:
+            print(f"[remote] NKN error: {message}")
+
+    def _on_message(self, src: str, body: Dict[str, Any]) -> None:
+        if not isinstance(body, dict) or body.get("type") != "command":
+            return
+        threading.Thread(target=self._execute_command, args=(src, body), daemon=True).start()
+
+    def _execute_command(self, src: str, body: Dict[str, Any]) -> None:
+        session_id = body.get("session_id")
+
+        def send(payload: Dict[str, object]) -> None:
+            if session_id:
+                payload = dict(payload)
+                payload["session_id"] = session_id
+            self.bridge.send_dm(src, payload)
+
+        send({"type": "handshake", "message": "Remote agent over NKN", "address": self.bridge.address})
+        send({"type": "ack", "message": "Remote agent ready and awaiting commands."})
+        cmd = body.get("cmd")
+        if not isinstance(cmd, list):
+            send({"type": "error", "message": "Invalid command payload."})
+            return
+        resolved_cmd = resolve_command(cmd)
+        _stream_command(
+            resolved_cmd,
+            body.get("description"),
+            self.env,
+            send,
+            session_id=session_id,
+        )
 if __name__ == "__main__":
     main()

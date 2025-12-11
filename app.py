@@ -765,6 +765,16 @@ def run_curses_interface() -> Optional[list[str]]:
     remote_settings.setdefault("mode", "reverse")
     remote_settings.setdefault("reverse_port", remote_client.get_reverse_port())
 
+    def _format_bytes(value: int) -> str:
+        val = float(value)
+        for unit in ("B", "KB", "MB", "GB"):
+            if val < 1024 or unit == "GB":
+                if unit == "B":
+                    return f"{int(val)}{unit}"
+                return f"{val:.1f}{unit}"
+            val /= 1024
+        return f"{val:.1f}TB"
+
     def select_checkpoint(stdscr: "curses._CursesWindow", checkpoints: list[Path]) -> Optional[Path]:
         if not checkpoints:
             stdscr.erase()
@@ -1062,17 +1072,77 @@ def run_curses_interface() -> Optional[list[str]]:
         num_envs = 4
         listener_error: Optional[str] = None
 
+        def _refresh_remote_settings() -> None:
+            nonlocal remote_settings
+            remote_settings = remote_client.get_remote_config()
+            remote_settings.setdefault("mode", "reverse")
+            remote_settings.setdefault("reverse_port", remote_client.get_reverse_port())
+
+        def _stop_all_remote_services() -> None:
+            remote_client.stop_reverse_listener()
+            remote_client.stop_nkn_client()
+
         def activate_reverse_listener() -> None:
             nonlocal listener_error
             listener_error = None
             try:
                 remote_client.ensure_reverse_listener()
-                remote_settings.update(remote_client.get_remote_config())
+                _refresh_remote_settings()
             except Exception as exc:
                 listener_error = f"Reverse listener error: {exc}"
 
-        if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
-            activate_reverse_listener()
+        def _start_remote_mode() -> None:
+            nonlocal listener_error
+            listener_error = None
+            mode = remote_settings.get("mode", "reverse")
+            if mode == "reverse":
+                activate_reverse_listener()
+            elif mode == "direct":
+                try:
+                    remote_client.auto_discover_remote()
+                    _refresh_remote_settings()
+                except Exception as exc:
+                    listener_error = f"Direct remote error: {exc}"
+            elif mode == "nkn":
+                try:
+                    remote_client.ensure_nkn_client(remote_settings)
+                    _refresh_remote_settings()
+                except Exception as exc:
+                    listener_error = f"NKN client error: {exc}"
+
+        if remote_settings.get("enabled"):
+            _start_remote_mode()
+
+        def _cycle_remote_mode() -> None:
+            nonlocal listener_error
+            modes = ["reverse", "direct", "nkn"]
+            current = remote_settings.get("mode", "reverse")
+            try:
+                idx = modes.index(current)
+            except ValueError:
+                idx = 0
+            next_mode = modes[(idx + 1) % len(modes)]
+            remote_settings["mode"] = next_mode
+            remote_client.save_remote_config(remote_settings)
+            _refresh_remote_settings()
+            listener_error = None
+            _stop_all_remote_services()
+            if remote_settings.get("enabled"):
+                _start_remote_mode()
+
+        def configure_nkn_target_local(stdscr: "curses._CursesWindow") -> None:
+            nonlocal listener_error
+            value = prompt_for_config_name(stdscr, "NKN target (remote NKN address):")
+            if not value:
+                return
+            listener_error = None
+            nkn_cfg = remote_settings.setdefault("nkn", {})
+            nkn_cfg["target"] = value.strip()
+            remote_client.save_remote_config(remote_settings)
+            _refresh_remote_settings()
+            if remote_settings.get("enabled") and remote_settings.get("mode") == "nkn":
+                _stop_all_remote_services()
+                _start_remote_mode()
 
         def build_args() -> list[str]:
             args = [f"--run={runs[selected]}"]
@@ -1129,6 +1199,29 @@ def run_curses_interface() -> Optional[list[str]]:
             listener_status = "connected" if reverse_remote.is_agent_available() else "waiting"
             listener_note = remote_client.get_listener_status()
             discovery_note = remote_client.get_discovery_status()
+            remote_mode = remote_settings.get("mode", "reverse")
+            remote_mode_label = remote_mode.capitalize()
+            remote_target_line = ""
+            remote_status_entries: list[str] = []
+            if remote_mode == "direct":
+                remote_target_line = f"[R] Remote host: {remote_host}:{remote_port}"
+                remote_status_entries.append(f"Discovery: {discovery_note}")
+            elif remote_mode == "reverse":
+                remote_target_line = f"Reverse listener: {local_ip}:{reverse_port} ({listener_status})"
+                remote_status_entries.append(f"Listener status: {listener_note}")
+            else:
+                nkn_target = remote_client.get_nkn_target()
+                nkn_remote_addr = remote_client.get_nkn_remote_address()
+                remote_target_line = f"[N] NKN target: {nkn_target or 'unset'}"
+                remote_status_entries.append(f"NKN remote addr: {nkn_remote_addr or 'unknown'}")
+                remote_status_entries.append(f"NKN status: {remote_client.get_nkn_status()}")
+                stats = remote_client.get_nkn_stats()
+                remote_status_entries.append(
+                    f"NKN bytes I/O: {_format_bytes(stats['bytes_in'])}/{_format_bytes(stats['bytes_out'])}"
+                )
+                remote_status_entries.append(
+                    f"NKN messages I/O: {stats['messages_in']}/{stats['messages_out']}"
+                )
             options = [
                 f"[h] Headless: {'ON' if headless else 'OFF'}",
                 f"[v] Video capture: {'ON' if video else 'OFF'}",
@@ -1141,23 +1234,15 @@ def run_curses_interface() -> Optional[list[str]]:
                 f"[a] Save after: {'ON' if save_after else 'OFF'}",
                 f"[t] Training config: {training_active_name}",
                 f"[r] Remote compute: {'ON' if remote_enabled else 'OFF'}",
-                f"[R] Remote host: {remote_host}:{remote_port}",
-                f"Discovery: {discovery_note}",
-                f"Reverse listener: {local_ip}:{reverse_port} ({listener_status})",
+                f"[M] Remote mode: {remote_mode_label}",
+                remote_target_line,
             ]
+            options.extend(remote_status_entries)
             for idx, text in enumerate(options):
                 row = info_row + idx
                 if row >= height - 3:
                     break
                 stdscr.addstr(row, 5, text[: max(0, width - 8)])
-            status_row = info_row + len(options)
-            if status_row < height - 3:
-                status_text = listener_note[: max(0, width - 10)]
-                stdscr.addstr(
-                    status_row,
-                    5,
-                    f"Listener status: {status_text}",
-                )
 
             footer = "[Enter] Run   [q] Quit"
             stdscr.addstr(height - 1, max(2, (width - len(footer)) // 2), footer, curses.color_pair(1))
@@ -1171,7 +1256,7 @@ def run_curses_interface() -> Optional[list[str]]:
                 height - 3,
                 2,
                 "Use ↑/↓ to change run; toggle values with highlighted keys "
-                "(n/m for envs, t for configs, r/R for remote).",
+                "(n/m for envs, t for configs, r/R/M/N for remote).",
                 curses.A_DIM,
             )
 
@@ -1214,17 +1299,17 @@ def run_curses_interface() -> Optional[list[str]]:
             elif key == ord("r"):
                 remote_settings["enabled"] = not bool(remote_settings.get("enabled"))
                 remote_client.save_remote_config(remote_settings)
-                if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
-                    activate_reverse_listener()
-                else:
-                    remote_client.stop_reverse_listener()
-                if remote_settings.get("enabled") and remote_settings.get("mode") == "direct":
-                    remote_client.auto_discover_remote()
-                    remote_settings = remote_client.get_remote_config()
-                if remote_settings.get("enabled") and remote_settings.get("mode") == "reverse":
-                    activate_reverse_listener()
+                _refresh_remote_settings()
+                _stop_all_remote_services()
+                if remote_settings.get("enabled"):
+                    _start_remote_mode()
             elif key == ord("R"):
                 configure_remote_target(stdscr)
+                _refresh_remote_settings()
+            elif key == ord("M"):
+                _cycle_remote_mode()
+            elif key == ord("N"):
+                configure_nkn_target_local(stdscr)
             elif key == ord("t"):
                 training_config_menu(stdscr)
             elif key in (10, 13):
@@ -1243,6 +1328,7 @@ def run_curses_interface() -> Optional[list[str]]:
         interactive_args = None
     finally:
         remote_client.stop_reverse_listener()
+        remote_client.stop_nkn_client()
         for sig, handler in handlers.items():
             signal.signal(sig, handler)
         training_configs["last_used"] = training_active_name
