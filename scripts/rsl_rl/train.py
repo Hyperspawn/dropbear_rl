@@ -278,7 +278,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 worker_ready_event.set()
                 return
             if msg_type == MSG_HEARTBEAT:
-                worker_ready_event.set()
+                # Heartbeat is informative but does not unlock readiness.
                 return
             if msg_type == MSG_METRICS:
                 iteration = envelope.payload.get("iteration")

@@ -140,20 +140,20 @@ class RemoteVecEnv:
 
     def _handle_network_message(self, src: str, body: Dict[str, Any]) -> None:
         """Handle incoming network messages."""
-        # Only process messages from controller (allow subclient suffix)
-        expected = self.controller_address
-        if expected and not src.startswith(expected):
-            print(f"[remote_env] Ignoring message from {src}; expected {expected}")
-            if self._original_on_message:
-                self._original_on_message(src, body)
-            return
-
         try:
+            # Ignore self-loop messages (e.g., our own heartbeats)
+            if src and self.nkn_bridge and src == getattr(self.nkn_bridge, "address", ""):
+                return
+
             envelope = MessageEnvelope.from_dict(body)
             processed = self.sequencer.process_message(envelope)
 
             if processed and processed.msg_type == MSG_OBS_BATCH:
-                # Queue observation message
+                # Only accept obs from controller (allow subclient suffix)
+                expected = self.controller_address
+                if expected and not src.startswith(expected):
+                    print(f"[remote_env] Dropping obs from {src}; expected {expected}")
+                    return
                 self.obs_queue.put(processed, block=False)
                 try:
                     step_id = processed.payload.get("step_id")

@@ -75,18 +75,13 @@ class ControllerRemoteEnvWrapper:
 
     def _handle_network_message(self, src: str, body: Dict[str, Any]) -> None:
         """Handle incoming network messages."""
-        # Only process action messages from our worker (allow subclient suffix)
-        expected = self.worker_address
-        if expected and not src.startswith(expected):
-            print(f"[controller_env] Ignoring message from {src}; expected {expected}")
-            if self._original_on_message:
-                self._original_on_message(src, body)
-            return
-
         # Ignore non-protocol messages (e.g., handshake/status)
         if not isinstance(body, dict) or "msg_type" not in body:
             if self._original_on_message:
                 self._original_on_message(src, body)
+            return
+        # Ignore self-loop messages
+        if src and self.nkn_bridge and src == getattr(self.nkn_bridge, "address", ""):
             return
 
         try:
