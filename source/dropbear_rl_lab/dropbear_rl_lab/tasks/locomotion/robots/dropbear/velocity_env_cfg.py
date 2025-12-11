@@ -389,7 +389,8 @@ class DropbearVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the Dropbear locomotion velocity-tracking environment."""
 
     # Scene settings
-    scene: RobotSceneCfg = RobotSceneCfg(num_envs=4, env_spacing=5.0)  # Very small for testing
+    # Keep environments close to origin for visualization
+    scene: RobotSceneCfg = RobotSceneCfg(num_envs=4, env_spacing=2.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
