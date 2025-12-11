@@ -218,7 +218,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             worker_address=worker_address,
             timeout=30.0,
         )
-        print("[train.py] Environment wrapped - simulation local, policy remote!")
+        print("[train.py] ========================================")
+        print("[train.py] ✓ Environment wrapped with ControllerRemoteEnvWrapper!")
+        print("[train.py] ✓ Simulation: RTX (IsaacLab)")
+        print("[train.py] ✓ Policy: A100 (via NKN)")
+        print(f"[train.py] ✓ Worker address: {worker_address}")
+        print("[train.py] ========================================")
 
         # Setup checkpoint receiver to get trained models from A100
         from checkpoint_transfer_protocol import CheckpointReceiver, MSG_CHECKPOINT_START, MSG_CHECKPOINT_CHUNK, MSG_CHECKPOINT_REQUEST_RETRY, MSG_CHECKPOINT_ACK
